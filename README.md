@@ -32,9 +32,9 @@ plan, license, and scaffolding only.
 ## Configuration
 
 The widget reads a JSON config from
-`~/Library/Application Support/macOS Stats Widget/metrics.json`. Each metric
-has a target URL, a CSS selector or screenshot crop region, a refresh interval,
-and a display mode (Number or Screenshot). See
+`~/Library/Application Support/macOS Stats Widget/trackers.json`. Each tracker
+has a target URL, a CSS selector or element bounding rect, a refresh interval,
+and a render mode (Text or Snapshot). See
 [PLAN.md §5 Configuration schema](PLAN.md#5-configuration-schema) for the full
 shape and migration strategy.
 
@@ -43,12 +43,12 @@ shape and migration strategy.
 Once the UI exists, the flow will be:
 
 1. Open **macOS Stats Widget.app**.
-2. Click **+ Add metric** in Preferences.
+2. Click **+ Add tracker** in Preferences.
 3. The in-app browser opens. Sign in to the page you want to track.
-4. Click **Identify Element**, hover the number on the page until it lights up,
+4. Click **Identify Element**, hover the value on the page until it lights up,
    click to capture.
-5. Pick **Number** or **Screenshot** mode, set a refresh interval, save.
-6. Add the widget to your desktop or notification centre. The number appears.
+5. Pick **Text** or **Snapshot** mode, set a refresh interval, save.
+6. Add the widget to your desktop or notification centre. The value appears.
 
 The full walkthrough — including screenshots and the exact UX state machine —
 will be filled in once the UI is built. See
