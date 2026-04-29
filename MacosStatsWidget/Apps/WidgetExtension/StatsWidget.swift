@@ -129,23 +129,29 @@ struct StatsWidgetEntryView: View {
     private var templateView: some View {
         switch entry.configuration?.templateID ?? defaultTemplate {
         case .singleBigNumber:
-            SingleBigNumberWidgetView(item: item(at: 0))
+            SingleBigNumberTemplate(item: item(at: 0))
         case .numberPlusSparkline:
-            NumberSparklineWidgetView(item: item(at: 0))
+            NumberPlusSparklineTemplate(item: item(at: 0))
         case .gaugeRing:
-            GaugeRingWidgetView(item: item(at: 0))
+            GaugeRingTemplate(item: item(at: 0))
         case .liveSnapshotTile:
-            LiveSnapshotTileWidgetView(item: item(at: 0))
+            LiveSnapshotTileTemplate(item: item(at: 0))
         case .headlineSparkline:
-            HeadlineSparklineWidgetView(item: item(at: 0))
+            HeadlineSparklineTemplate(item: item(at: 0))
+        case .dualStatCompare:
+            DualStatCompareTemplate(items: items(limit: 2))
         case .dashboard3Up:
-            Dashboard3UpWidgetView(items: items(limit: 3))
+            Dashboard3UpTemplate(items: items(limit: 3))
         case .snapshotPlusStat:
-            SnapshotPlusStatWidgetView(snapshotItem: snapshotItem(), textItem: textItem(excluding: snapshotItem()?.id))
+            SnapshotPlusStatTemplate(snapshotItem: snapshotItem(), textItem: textItem(excluding: snapshotItem()?.id))
+        case .statsListWatchlist:
+            StatsListWatchlistTemplate(items: items(limit: 6))
+        case .heroPlusDetail:
+            HeroPlusDetailTemplate(item: item(at: 0))
         case .liveSnapshotHero:
-            LiveSnapshotHeroWidgetView(item: item(at: 0))
-        default:
-            fallbackView
+            LiveSnapshotHeroTemplate(item: item(at: 0))
+        case .megaDashboardGrid:
+            MegaDashboardGridTemplate(items: items(limit: 8))
         }
     }
 
@@ -154,24 +160,34 @@ struct StatsWidgetEntryView: View {
         if item(at: 0)?.tracker.renderMode == .snapshot {
             switch family {
             case .systemLarge:
-                LiveSnapshotHeroWidgetView(item: item(at: 0))
+                LiveSnapshotHeroTemplate(item: item(at: 0))
             default:
-                LiveSnapshotTileWidgetView(item: item(at: 0))
+                LiveSnapshotTileTemplate(item: item(at: 0))
             }
+        } else if #available(macOSApplicationExtension 14.0, *), family == .systemExtraLarge {
+            MegaDashboardGridTemplate(items: items(limit: 8))
         } else {
             switch family {
             case .systemMedium:
-                Dashboard3UpWidgetView(items: items(limit: 3))
+                Dashboard3UpTemplate(items: items(limit: 3))
+            case .systemLarge:
+                StatsListWatchlistTemplate(items: items(limit: 6))
             default:
-                SingleBigNumberWidgetView(item: item(at: 0))
+                SingleBigNumberTemplate(item: item(at: 0))
             }
         }
     }
 
     private var defaultTemplate: WidgetTemplate {
+        if #available(macOSApplicationExtension 14.0, *), family == .systemExtraLarge {
+            return .megaDashboardGrid
+        }
+
         switch family {
         case .systemMedium:
             return .dashboard3Up
+        case .systemLarge:
+            return .statsListWatchlist
         default:
             return .singleBigNumber
         }
@@ -215,11 +231,19 @@ struct StatsWidget: Widget {
         }
         .configurationDisplayName("macOS Stats Widget")
         .description("Show tracked page values from the main app.")
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .supportedFamilies(supportedFamilies)
+    }
+
+    private var supportedFamilies: [WidgetFamily] {
+        var families: [WidgetFamily] = [.systemSmall, .systemMedium, .systemLarge]
+        if #available(macOSApplicationExtension 14.0, *) {
+            families.append(.systemExtraLarge)
+        }
+        return families
     }
 }
 
-private struct WidgetTrackerItem: Identifiable {
+struct WidgetTrackerItem: Identifiable {
     let tracker: Tracker
     let reading: TrackerReading?
 
@@ -280,7 +304,7 @@ private struct WidgetTrackerItem: Identifiable {
     }
 }
 
-private struct EmptyWidgetView: View {
+struct EmptyWidgetView: View {
     var body: some View {
         VStack(spacing: 6) {
             Text("macOS Stats Widget")
@@ -414,7 +438,7 @@ private struct SnapshotPlusStatWidgetView: View {
     }
 }
 
-private struct SnapshotImageView: View {
+struct SnapshotImageView: View {
     let item: WidgetTrackerItem?
     let cornerRadius: CGFloat
 
@@ -441,7 +465,7 @@ private struct SnapshotImageView: View {
     }
 }
 
-private struct SnapshotOverlay: View {
+struct SnapshotOverlay: View {
     let item: WidgetTrackerItem?
 
     var body: some View {
@@ -569,7 +593,7 @@ private struct Dashboard3UpWidgetView: View {
     }
 }
 
-private struct SparklineView: View {
+struct SparklineView: View {
     let values: [Double]
     let tint: Color
 

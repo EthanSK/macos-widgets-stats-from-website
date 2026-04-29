@@ -56,6 +56,39 @@ final class AppGroupStore: ObservableObject {
 
     func deleteTracker(id: UUID) {
         trackers.removeAll { $0.id == id }
+        widgetConfigurations = widgetConfigurations.map { configuration in
+            var updated = configuration
+            updated.trackerIDs.removeAll { $0 == id }
+            return updated
+        }
+        persist()
+    }
+
+    func addWidgetConfiguration(_ configuration: WidgetConfiguration) {
+        widgetConfigurations.append(configuration)
+        persist()
+    }
+
+    func updateWidgetConfiguration(_ configuration: WidgetConfiguration) {
+        guard let index = widgetConfigurations.firstIndex(where: { $0.id == configuration.id }) else {
+            addWidgetConfiguration(configuration)
+            return
+        }
+
+        widgetConfigurations[index] = configuration
+        persist()
+    }
+
+    func upsertWidgetConfiguration(_ configuration: WidgetConfiguration) {
+        if widgetConfigurations.contains(where: { $0.id == configuration.id }) {
+            updateWidgetConfiguration(configuration)
+        } else {
+            addWidgetConfiguration(configuration)
+        }
+    }
+
+    func deleteWidgetConfiguration(id: UUID) {
+        widgetConfigurations.removeAll { $0.id == id }
         persist()
     }
 
