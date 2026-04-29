@@ -36,12 +36,12 @@ def load_or_create(path: Path) -> tuple[ET.ElementTree, ET.Element]:
 
     rss = ET.Element("rss", {"version": "2.0"})
     channel = ET.SubElement(rss, "channel")
-    ET.SubElement(channel, "title").text = "macOS Stats Widget Updates"
-    ET.SubElement(channel, "link").text = "https://ethansk.github.io/macos-stats-widget/"
-    ET.SubElement(channel, "description").text = "Automatic update feed for macOS Stats Widget."
+    ET.SubElement(channel, "title").text = "macOS Widgets Stats from Website Updates"
+    ET.SubElement(channel, "link").text = "https://ethansk.github.io/macos-widgets-stats-from-website/"
+    ET.SubElement(channel, "description").text = "Automatic update feed for macOS Widgets Stats from Website."
     ET.SubElement(channel, "language").text = "en"
     atom_link = ET.SubElement(channel, f"{{{ATOM_NS}}}link")
-    atom_link.set("href", "https://ethansk.github.io/macos-stats-widget/appcast.xml")
+    atom_link.set("href", "https://ethansk.github.io/macos-widgets-stats-from-website/appcast.xml")
     atom_link.set("rel", "self")
     atom_link.set("type", "application/rss+xml")
     return ET.ElementTree(rss), channel
@@ -55,7 +55,7 @@ def build_item() -> ET.Element:
     zip_filename = require("ZIP_FILENAME")
     zip_size = require("ZIP_SIZE")
     ed_signature = require("ED_SIGNATURE")
-    repo = os.environ.get("REPO", "EthanSK/macos-stats-widget")
+    repo = os.environ.get("REPO", "EthanSK/macos-widgets-stats-from-website")
     min_macos = os.environ.get("MIN_MACOS", "13.0")
     release_notes_url = os.environ.get(
         "RELEASE_NOTES_URL",
@@ -66,7 +66,7 @@ def build_item() -> ET.Element:
     )
 
     item = ET.Element("item")
-    ET.SubElement(item, "title").text = f"macOS Stats Widget v{display_version}"
+    ET.SubElement(item, "title").text = f"macOS Widgets Stats from Website v{display_version}"
     ET.SubElement(item, "pubDate").text = pub_date
     ET.SubElement(item, f"{SPARKLE}version").text = build_number
     ET.SubElement(item, f"{SPARKLE}shortVersionString").text = version

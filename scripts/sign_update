@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ARCHIVE="${1:-}"
 PRIVATE_KEY="${2:-${SPARKLE_ED25519_PRIVATE_KEY:-}}"
 SPARKLE_VERSION="${SPARKLE_VERSION:-2.6.4}"
-KEYCHAIN_ACCOUNT="${SPARKLE_KEYCHAIN_ACCOUNT:-macos-stats-widget}"
+KEYCHAIN_ACCOUNT="${SPARKLE_KEYCHAIN_ACCOUNT:-macos-widgets-stats-from-website}"
 
 if [ -z "$ARCHIVE" ]; then
   echo "usage: scripts/sign_update <archive.zip> [base64-private-key]" >&2

@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  APP_NAME: MacosStatsWidget
+  APP_NAME: MacosWidgetsStatsFromWebsite
   SPARKLE_VERSION: 2.6.4
   DEVELOPMENT_TEAM_FALLBACK: T34G959ZG8
 
@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           CERT_PATH="$RUNNER_TEMP/developer-id.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/macos-stats-widget-signing.keychain-db"
+          KEYCHAIN_PATH="$RUNNER_TEMP/macos-widgets-stats-from-website-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
 
           printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
@@ -94,8 +94,8 @@ jobs:
       - name: Resolve Swift packages
         run: |
           xcodebuild -resolvePackageDependencies \
-            -project MacosStatsWidget.xcodeproj \
-            -scheme MacosStatsWidget \
+            -project MacosWidgetsStatsFromWebsite.xcodeproj \
+            -scheme MacosWidgetsStatsFromWebsite \
             -packageAuthorizationProvider netrc \
             -scmProvider system
 
@@ -107,10 +107,10 @@ jobs:
           set -euo pipefail
           TEAM_ID="${APPLE_TEAM_ID:-${DEVELOPMENT_TEAM:-$DEVELOPMENT_TEAM_FALLBACK}}"
           xcodebuild archive \
-            -project MacosStatsWidget.xcodeproj \
-            -scheme MacosStatsWidget \
+            -project MacosWidgetsStatsFromWebsite.xcodeproj \
+            -scheme MacosWidgetsStatsFromWebsite \
             -configuration Release \
-            -archivePath build/MacosStatsWidget.xcarchive \
+            -archivePath build/MacosWidgetsStatsFromWebsite.xcarchive \
             -packageAuthorizationProvider netrc \
             -scmProvider system \
             DEVELOPMENT_TEAM="$TEAM_ID"
@@ -118,7 +118,7 @@ jobs:
       - name: Export archive
         run: |
           xcodebuild -exportArchive \
-            -archivePath build/MacosStatsWidget.xcarchive \
+            -archivePath build/MacosWidgetsStatsFromWebsite.xcarchive \
             -exportOptionsPlist scripts/ExportOptions.plist \
             -exportPath build/Export
 
@@ -188,7 +188,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
           cat > build/release-notes.md <<EOF
-          ## macOS Stats Widget v$VERSION
+          ## macOS Widgets Stats from Website v$VERSION
 
           Signed and notarized macOS release.
 
@@ -196,7 +196,7 @@ jobs:
           EOF
 
           gh release create "$TAG" "${{ steps.zip.outputs.zip_path }}" \
-            --title "macOS Stats Widget v$VERSION" \
+            --title "macOS Widgets Stats from Website v$VERSION" \
             --notes-file build/release-notes.md \
             --target "$GITHUB_SHA" \
             --latest
@@ -211,7 +211,7 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
-          BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' MacosStatsWidget/Apps/MainApp/Info.plist)"
+          BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' MacosWidgetsStatsFromWebsite/Apps/MainApp/Info.plist)"
           GH_PAGES_DIR="$RUNNER_TEMP/gh-pages"
 
           git fetch origin gh-pages:refs/remotes/origin/gh-pages

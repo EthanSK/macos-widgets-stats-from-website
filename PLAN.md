@@ -1,4 +1,4 @@
-# macOS Stats Widget — Plan
+# macOS Widgets Stats from Website — Plan
 
 > Living design document. **v0.0.4 is the canonical pre-implementation state.**
 > Implementation begins at v0.1 once this is signed off. v0.0.4 consolidates
@@ -140,7 +140,7 @@ it. There is one source of truth.
   - Updates: WebKit is patched by the OS; we never ship a stale browser.
   - Cookie persistence: `WKWebsiteDataStore(forIdentifier:)` gives us a named
     persistent profile out of the box.
-- **`WKWebsiteDataStore(forIdentifier: "macos-stats-widget")`** — single
+- **`WKWebsiteDataStore(forIdentifier: "macos-widgets-stats-from-website")`** — single
   named persistent profile shared between the in-app browser and the headless
   scraper. Cookies, IndexedDB, localStorage, service worker registrations all
   persist across launches, so a site stays logged in after the user signs in
@@ -171,10 +171,10 @@ it. There is one source of truth.
 ## 4. Module structure
 
 ```
-MacosStatsWidget/
+MacosWidgetsStatsFromWebsite/
   Apps/
     MainApp/
-      MacosStatsWidgetApp.swift       — app entry, scene wiring
+      MacosWidgetsStatsFromWebsiteApp.swift       — app entry, scene wiring
       AppDelegate.swift               — menu bar / dock icon control
       PreferencesWindow.swift         — main preferences container
       TrackersListView.swift          — list of configured trackers
@@ -190,7 +190,7 @@ MacosStatsWidget/
       SelectorPackImportView.swift    — drag-drop / open-with handler
       BackgroundScheduler.swift       — NSBackgroundActivityScheduler wrapper
     WidgetExtension/
-      MacosStatsWidgetBundle.swift    — registers all widget kinds
+      MacosWidgetsStatsFromWebsiteBundle.swift    — registers all widget kinds
       StatsWidget.swift               — TimelineProvider + entry view
       Templates/
         SingleBigNumber.swift         — small / Text
@@ -276,7 +276,7 @@ needs more than one line to describe, it's doing too much and we split it.
 
 ## 5. Configuration schema
 
-Stored at `~/Library/Application Support/macOS Stats Widget/trackers.json`
+Stored at `~/Library/Application Support/macOS Widgets Stats from Website/trackers.json`
 (the **canonical config** — the App Group container holds a *copy* the
 widget reads, written atomically by the main app):
 
@@ -288,7 +288,7 @@ widget reads, written atomically by the main app):
       "id": "8c1b2e6e-…",                 // UUID, immutable — the tracker ID
       "name": "Codex weekly spend",
       "url": "https://platform.openai.com/usage",
-      "browserProfile": "macos-stats-widget", // WKWebsiteDataStore identifier
+      "browserProfile": "macos-widgets-stats-from-website", // WKWebsiteDataStore identifier
       "renderMode": "text",               // "text" | "snapshot"
       "selector": "div[data-testid=\"weekly-cost\"] span",
       "elementBoundingBox": {              // captured at Identify Element time
@@ -412,7 +412,7 @@ rotating backups.
 [New Tracker — Step 1: Browse]
    ├─ embedded WKWebView, full chrome (back/forward/reload/url-bar)
    ├─ user signs in (cookies persisted via WKWebsiteDataStore identifier
-   │  "macos-stats-widget"; passkey path used when site supports it)
+   │  "macos-widgets-stats-from-website"; passkey path used when site supports it)
    ├─ user navigates to the page that has the value/region they want
    ▼
 [New Tracker — Step 2: Identify Element]
@@ -443,7 +443,7 @@ flow:
 
 ```
 ┌─ Browser & Sign-in ─────────────────────────────────────────┐
-│  Profile: macos-stats-widget (WKWebsiteDataStore)           │
+│  Profile: macos-widgets-stats-from-website (WKWebsiteDataStore)           │
 │                                                              │
 │  [ Sign in to a site ]   opens the in-app browser            │
 │  [ Re-sign in to … ▾  ]   pick a site we have cookies for    │
@@ -550,7 +550,7 @@ slower than the polling interval. Instead:
 ### 7.3 Shared knobs
 
 - **Browser profile.** `WKWebViewConfiguration` with
-  `websiteDataStore = WKWebsiteDataStore(forIdentifier: "macos-stats-widget")`.
+  `websiteDataStore = WKWebsiteDataStore(forIdentifier: "macos-widgets-stats-from-website")`.
   Same identifier in app and headless scraper. Cookies, IndexedDB,
   localStorage, service worker registrations, passkey state — all
   persistent.
@@ -846,7 +846,7 @@ it via Edit Widget).
 When no trackers exist, every widget renders an empty state:
 
 ```
-   "macOS Stats Widget"
+   "macOS Widgets Stats from Website"
    "No trackers configured"
    [Open App ➜]
 ```
@@ -882,7 +882,7 @@ Accessibility:
 | `com.apple.security.app-sandbox` | `true` | Required for App Store. |
 | `com.apple.security.network.client` | `true` | In-app browser, headless scraper, MCP socket, webhook POSTs all need outbound. |
 | `com.apple.security.files.user-selected.read-write` | `true` | Export / import selector packs from a Finder picker. |
-| `com.apple.security.application-groups` | `group.com.ethansk.macos-stats-widget` | Shared container with widget extension. |
+| `com.apple.security.application-groups` | `group.com.ethansk.macos-widgets-stats-from-website` | Shared container with widget extension. |
 | `com.apple.security.network.server` | *unset* | The MCP server uses stdio or a UNIX socket — neither needs the server entitlement. |
 | `com.apple.security.device.audio-input` etc. | *unset* | We touch no AV devices. |
 
@@ -905,7 +905,7 @@ The widget extension's entitlements are a **subset**: only `app-sandbox` and
    pre-submission.
 5. *No CLI in the App Store build.* The optional CLI is a **separate
    target** excluded from the App Store archive. Homebrew tap publishes
-   the CLI artefact (separate repo: `homebrew-macos-stats-widget`).
+   the CLI artefact (separate repo: `homebrew-macos-widgets-stats-from-website`).
 6. *No external-process spawning from the sandboxed app.* Self-heal does
    not invoke `codex` / `claude` / any binary; AI involvement only happens
    via the MCP server, initiated by the user's own agent session
@@ -938,7 +938,7 @@ complete product.
 | **v0.11** | First-launch flow (§14): sign-in → Identify Element → first widget. **No CLI detection step.** |
 | **v0.12** | Polish: error states, fail-safe, `.broken` status, re-Identify flow refinements, Homebrew CLI installer + LaunchAgent. |
 | **v1.0** | Polish, screenshots, GitHub Pages site, README setup walkthrough filled in. Mac App Store submission (app + widget extension only). |
-| **v1.1** | Homebrew tap published (`homebrew-macos-stats-widget`). |
+| **v1.1** | Homebrew tap published (`homebrew-macos-widgets-stats-from-website`). |
 | **v1.2** | Public selector pack gallery (community contributions, separate public repo). |
 | **v2.x** | Cross-browser support: Chrome via CDP, Firefox via Marionette. Same selector / capture flow, different transport. Optional, only if WKWebView proves limiting. |
 
@@ -1064,7 +1064,7 @@ tracker, capped) and gives near-real-time visuals.
 ### 12.11 Sign-in persistence APIs
 *Requirement:* Use the proper macOS APIs for session persistence.
 *Resolution:*
-- `WKWebsiteDataStore(forIdentifier: "macos-stats-widget")` for the named
+- `WKWebsiteDataStore(forIdentifier: "macos-widgets-stats-from-website")` for the named
   persistent cookie / IndexedDB / localStorage profile.
 - **Keychain Services API** for any user-entered credentials (rare, since
   most tracked sites are OAuth/SSO).
@@ -1191,7 +1191,7 @@ user-facing feature is reachable as a tool.
 Two transports, picked at startup based on caller context:
 
 - **Stdio.** When invoked as a child process by an MCP client (the agent's
-  MCP config points at the `.app/Contents/MacOS/macos-stats-widget-mcp`
+  MCP config points at the `.app/Contents/MacOS/macos-widgets-stats-from-website-mcp`
   binary, or to a launcher script). JSON-RPC 2.0 over stdin / stdout.
   **App Store-safe** — no socket, no listener, no network entitlement.
 - **UNIX domain socket.** When the main app is already running, it binds a
@@ -1236,7 +1236,7 @@ Future tools (post-v1, listed for visibility): `pause_tracker`,
   1. **File permissions.** The socket is created mode `0600` owned by the
      user. Only the user's own processes can connect.
   2. **Shared-secret handshake.** On `initialize`, the client must send a
-     token stored in Keychain under `mcp-secret/macos-stats-widget`. The
+     token stored in Keychain under `mcp-secret/macos-widgets-stats-from-website`. The
      token is regenerated on each app launch. The user retrieves the
      current token from Preferences → MCP → "Reveal token" (or via a
      companion CLI command in the Homebrew tap) and pastes it into their
@@ -1254,7 +1254,7 @@ Future tools (post-v1, listed for visibility): `pause_tracker`,
 - All scrape URLs are validated as `https://` only (or `http://localhost`
   for testing). No `file://`, no `javascript:`.
 - The MCP server logs every tool invocation to
-  `~/Library/Logs/macOS Stats Widget/mcp.log` with timestamp, tool name,
+  `~/Library/Logs/macOS Widgets Stats from Website/mcp.log` with timestamp, tool name,
   caller (stdio child PID or socket-peer creds), and argument fingerprint
   (no sensitive values). Users can audit what their agents have done from
   Preferences → MCP → "View audit log".
@@ -1268,7 +1268,7 @@ This is documentation, not code, and lives in the README and project site —
 
 ```
 # Claude Code (~/.claude/skills/your-name-here/SKILL.md)
-This MCP server is at /Applications/macOS Stats Widget.app/.../macos-stats-widget-mcp
+This MCP server is at /Applications/macOS Widgets Stats from Website.app/.../macos-widgets-stats-from-website-mcp
 Auth token: see Preferences → MCP → "Reveal token" in the app
 
 # Codex CLI (~/.codex/AGENTS.md or whatever the user uses)
@@ -1305,7 +1305,7 @@ experience but never blocks the install. **There is no CLI-detection step**
 
 Picking a starter pre-fills the URL but the user still signs in themselves.
 We never store credentials; cookies persist via
-`WKWebsiteDataStore(forIdentifier: "macos-stats-widget")`. Passkey flows
+`WKWebsiteDataStore(forIdentifier: "macos-widgets-stats-from-website")`. Passkey flows
 route through `ASWebAuthenticationSession`.
 
 ### Step 2 — Identify Element
@@ -1325,7 +1325,7 @@ the tracker, sets SF Symbol + accent. Save commits to `trackers.json`.
 │                                                                 │
 │  How to add it:                                                 │
 │   1. Right-click the desktop ➜ Edit Widgets                     │
-│   2. Search "macOS Stats Widget"                                │
+│   2. Search "macOS Widgets Stats from Website"                                │
 │   3. Drag the small one onto your desktop                       │
 │   4. Pick "Codex Only" from the configuration picker            │
 │                                                                 │

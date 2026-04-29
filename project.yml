@@ -1,4 +1,4 @@
-name: MacosStatsWidget
+name: MacosWidgetsStatsFromWebsite
 
 options:
   minimumXcodeGenVersion: 2.39.0
@@ -21,31 +21,31 @@ packages:
     from: 2.6.0
 
 targets:
-  MacosStatsWidget:
+  MacosWidgetsStatsFromWebsite:
     type: application
     platform: macOS
     deploymentTarget: "13.0"
-    productName: MacosStatsWidget
+    productName: MacosWidgetsStatsFromWebsite
     sources:
-      - path: MacosStatsWidget/Apps/MainApp
-      - path: MacosStatsWidget/Shared
+      - path: MacosWidgetsStatsFromWebsite/Apps/MainApp
+      - path: MacosWidgetsStatsFromWebsite/Shared
     dependencies:
-      - target: MacosStatsWidgetWidget
+      - target: MacosWidgetsStatsFromWebsiteWidget
         embed: true
         codeSign: true
       - package: Sparkle
         product: Sparkle
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-stats-widget
-        INFOPLIST_FILE: MacosStatsWidget/Apps/MainApp/Info.plist
-        CODE_SIGN_ENTITLEMENTS: MacosStatsWidget/Apps/MainApp/MacosStatsWidget.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-widgets-stats-from-website
+        INFOPLIST_FILE: MacosWidgetsStatsFromWebsite/Apps/MainApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/MainApp/MacosWidgetsStatsFromWebsite.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
-      path: MacosStatsWidget/Apps/MainApp/Info.plist
+      path: MacosWidgetsStatsFromWebsite/Apps/MainApp/Info.plist
       properties:
         CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
-        CFBundleDisplayName: MacosStatsWidget
+        CFBundleDisplayName: macOS Widgets Stats from Website
         CFBundleExecutable: $(EXECUTABLE_NAME)
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleInfoDictionaryVersion: "6.0"
@@ -54,63 +54,63 @@ targets:
         CFBundleShortVersionString: "0.12.2"
         CFBundleVersion: "1202"
         CFBundleDocumentTypes:
-          - CFBundleTypeName: MacosStatsWidget Selector Pack
+          - CFBundleTypeName: macOS Widgets Stats from Website Selector Pack
             CFBundleTypeRole: Editor
             LSHandlerRank: Owner
             LSItemContentTypes:
-              - com.ethansk.macos-stats-widget.selectorpack
+              - com.ethansk.macos-widgets-stats-from-website.selectorpack
         CFBundleURLTypes:
-          - CFBundleURLName: MacosStatsWidget
+          - CFBundleURLName: MacosWidgetsStatsFromWebsite
             CFBundleURLSchemes:
-              - macos-stats-widget
+              - macos-widgets-stats-from-website
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSPrincipalClass: NSApplication
         SUEnableAutomaticChecks: true
-        SUFeedURL: https://ethansk.github.io/macos-stats-widget/appcast.xml
+        SUFeedURL: https://ethansk.github.io/macos-widgets-stats-from-website/appcast.xml
         SUPublicEDKey: 9PG32PH1UFbECc644qjE4OQtpiILuiPCOUuXvgND2tA=
         SUScheduledCheckInterval: 86400
         UTExportedTypeDeclarations:
-          - UTTypeIdentifier: com.ethansk.macos-stats-widget.selectorpack
-            UTTypeDescription: MacosStatsWidget Selector Pack
+          - UTTypeIdentifier: com.ethansk.macos-widgets-stats-from-website.selectorpack
+            UTTypeDescription: macOS Widgets Stats from Website Selector Pack
             UTTypeConformsTo:
               - public.json
             UTTypeTagSpecification:
               public.filename-extension:
                 - selectorpack
               public.mime-type:
-                - application/vnd.macos-stats-widget.selectorpack+json
+                - application/vnd.macos-widgets-stats-from-website.selectorpack+json
     entitlements:
-      path: MacosStatsWidget/Apps/MainApp/MacosStatsWidget.entitlements
+      path: MacosWidgetsStatsFromWebsite/Apps/MainApp/MacosWidgetsStatsFromWebsite.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.application-groups:
-          - group.com.ethansk.macos-stats-widget
+          - group.com.ethansk.macos-widgets-stats-from-website
         keychain-access-groups:
-          - "$(AppIdentifierPrefix)com.ethansk.macos-stats-widget"
+          - "$(AppIdentifierPrefix)com.ethansk.macos-widgets-stats-from-website"
 
-  MacosStatsWidgetWidget:
+  MacosWidgetsStatsFromWebsiteWidget:
     type: app-extension
     platform: macOS
     deploymentTarget: "13.0"
-    productName: MacosStatsWidgetWidget
+    productName: MacosWidgetsStatsFromWebsiteWidget
     sources:
-      - path: MacosStatsWidget/Apps/WidgetExtension
-      - path: MacosStatsWidget/Shared
+      - path: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension
+      - path: MacosWidgetsStatsFromWebsite/Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-stats-widget.widget
-        INFOPLIST_FILE: MacosStatsWidget/Apps/WidgetExtension/Info.plist
-        CODE_SIGN_ENTITLEMENTS: MacosStatsWidget/Apps/WidgetExtension/MacosStatsWidgetWidget.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-widgets-stats-from-website.widget
+        INFOPLIST_FILE: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension/MacosWidgetsStatsFromWebsiteWidget.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
     info:
-      path: MacosStatsWidget/Apps/WidgetExtension/Info.plist
+      path: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension/Info.plist
       properties:
         CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
-        CFBundleDisplayName: MacosStatsWidgetWidget
+        CFBundleDisplayName: macOS Widgets Stats from Website Widget
         CFBundleExecutable: $(EXECUTABLE_NAME)
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleInfoDictionaryVersion: "6.0"
@@ -121,27 +121,27 @@ targets:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
-      path: MacosStatsWidget/Apps/WidgetExtension/MacosStatsWidgetWidget.entitlements
+      path: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension/MacosWidgetsStatsFromWebsiteWidget.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.application-groups:
-          - group.com.ethansk.macos-stats-widget
+          - group.com.ethansk.macos-widgets-stats-from-website
 
-  MacosStatsWidgetCLI:
+  MacosWidgetsStatsFromWebsiteCLI:
     type: tool
     platform: macOS
     deploymentTarget: "13.0"
-    productName: macos-stats-widget
+    productName: macos-widgets-stats-from-website
     sources:
-      - path: MacosStatsWidget/Apps/CLI
-      - path: MacosStatsWidget/Shared
+      - path: MacosWidgetsStatsFromWebsite/Apps/CLI
+      - path: MacosWidgetsStatsFromWebsite/Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-stats-widget.cli
-        INFOPLIST_FILE: MacosStatsWidget/Apps/CLI/Info.plist
-        CODE_SIGN_ENTITLEMENTS: MacosStatsWidget/Apps/CLI/MacosStatsWidgetCLI.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-widgets-stats-from-website.cli
+        INFOPLIST_FILE: MacosWidgetsStatsFromWebsite/Apps/CLI/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/CLI/MacosWidgetsStatsFromWebsiteCLI.entitlements
     info:
-      path: MacosStatsWidget/Apps/CLI/Info.plist
+      path: MacosWidgetsStatsFromWebsite/Apps/CLI/Info.plist
       properties:
         CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
         CFBundleExecutable: $(EXECUTABLE_NAME)
@@ -153,38 +153,38 @@ targets:
         CFBundleVersion: "1202"
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
     entitlements:
-      path: MacosStatsWidget/Apps/CLI/MacosStatsWidgetCLI.entitlements
+      path: MacosWidgetsStatsFromWebsite/Apps/CLI/MacosWidgetsStatsFromWebsiteCLI.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.application-groups:
-          - group.com.ethansk.macos-stats-widget
+          - group.com.ethansk.macos-widgets-stats-from-website
         keychain-access-groups:
-          - "$(AppIdentifierPrefix)com.ethansk.macos-stats-widget"
+          - "$(AppIdentifierPrefix)com.ethansk.macos-widgets-stats-from-website"
 
 schemes:
-  MacosStatsWidget:
+  MacosWidgetsStatsFromWebsite:
     build:
       targets:
-        MacosStatsWidget: all
+        MacosWidgetsStatsFromWebsite: all
     run:
       config: Debug
     archive:
       config: Release
 
-  MacosStatsWidgetWidget:
+  MacosWidgetsStatsFromWebsiteWidget:
     build:
       targets:
-        MacosStatsWidgetWidget: all
+        MacosWidgetsStatsFromWebsiteWidget: all
     run:
       config: Debug
     archive:
       config: Release
 
-  MacosStatsWidgetCLI:
+  MacosWidgetsStatsFromWebsiteCLI:
     build:
       targets:
-        MacosStatsWidgetCLI: all
+        MacosWidgetsStatsFromWebsiteCLI: all
     run:
       config: Debug
     archive:

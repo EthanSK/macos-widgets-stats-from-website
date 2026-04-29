@@ -1,6 +1,6 @@
-# macOS Stats Widget — UX & WidgetKit Research
+# macOS Widgets Stats from Website — UX & WidgetKit Research
 
-> Research scope: Apple WidgetKit best practices, third-party widget-app survey, and a recommended catalog of 8–15 built-in widget templates for `EthanSK/macos-stats-widget`. Produced 2026-04-28. Research only — no code changes.
+> Research scope: Apple WidgetKit best practices, third-party widget-app survey, and a recommended catalog of 8–15 built-in widget templates for `EthanSK/macos-widgets-stats-from-website`. Produced 2026-04-28. Research only — no code changes.
 
 ---
 
@@ -79,7 +79,7 @@ Source: [Apple Support — Add and customize widgets on Mac](https://support.app
 
 ### 2.3 LLM-usage trackers (most relevant cohort)
 
-This is the closest analog to `macos-stats-widget` because the data shape is identical: a small set of numbers, scraped/polled from external services, refreshed several times an hour, displayed glanceably.
+This is the closest analog to `macos-widgets-stats-from-website` because the data shape is identical: a small set of numbers, scraped/polled from external services, refreshed several times an hour, displayed glanceably.
 
 - **CodexBar** ([github.com/steipete/CodexBar](https://github.com/steipete/CodexBar)) — menu-bar app, supports 15+ providers. **Two-bar meter pattern**: top bar = 5h session window, bottom bar = weekly window. "Merge Icons Mode" combines up to 3 providers into one menu-bar icon with a switcher. Insight: **stack two metrics vertically, hairline second metric, dim/badge for error states.**
 - **MeterBar** ([meterbar.app](https://meterbar.app/)) — tiered UI: menu-bar icon → notification-center widget (medium / large) → full dashboard. **Traffic-light status** (green/yellow/red). Insight: **progressive disclosure across surfaces; color-coded health is enough for the 90% glance case.**
@@ -247,7 +247,7 @@ Apple's standard widget configuration model is **right-click → Edit Widget** w
 But the gallery of templates is too rich for a one-line "pick a widget" picker. Recommended:
 
 **Surface 1 — Built-in template gallery in the main app's Preferences.**
-1. User opens **macOS Stats Widget.app → Widgets** tab.
+1. User opens **macOS Widgets Stats from Website.app → Widgets** tab.
 2. Gallery shows the 12 templates above as visual cards (use real screenshots / live previews where possible). Filter chips: `Small / Medium / Large / XL`, `Text / Snapshot / Mixed`, `1 tracker / 2–3 / 4+`.
 3. Clicking a card opens a config detail: "This template needs N trackers. Map them:" with dropdowns populated from the user's existing tracker library.
 4. **Save** writes the composition to `metrics.json` under a `widgetCompositions` key (template id + tracker bindings + per-tracker accent overrides).

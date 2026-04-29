@@ -2,4 +2,4 @@
 set -euo pipefail
 
 xcodegen
-xcodebuild -project MacosStatsWidget.xcodeproj -scheme MacosStatsWidget -configuration Debug build
+xcodebuild -project MacosWidgetsStatsFromWebsite.xcodeproj -scheme MacosWidgetsStatsFromWebsite -configuration Debug build
