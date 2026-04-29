@@ -18,6 +18,8 @@ struct TrackerEditorView: View {
     @State private var draft: Tracker
     @State private var labelText: String
     @State private var accentColor: Color
+    @State private var browserPresentation: IdentifyBrowserPresentation?
+    @State private var capturedText: String
 
     let mode: Mode
     let onSave: (Tracker) -> Void
@@ -28,6 +30,7 @@ struct TrackerEditorView: View {
         _draft = State(initialValue: tracker)
         _labelText = State(initialValue: tracker.label ?? "")
         _accentColor = State(initialValue: Color(hexString: tracker.accentColorHex) ?? Color(hexString: Tracker.defaultAccentColorHex) ?? .accentColor)
+        _capturedText = State(initialValue: "")
     }
 
     var body: some View {
@@ -73,9 +76,40 @@ struct TrackerEditorView: View {
                 }
 
                 Section {
-                    LabeledContent("Selector") {
-                        Text("Captured via Identify Element flow — coming in v0.3")
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            TextField("No element captured", text: readOnlySelectorBinding)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
+
+                            Button {
+                                openIdentifyBrowser()
+                            } label: {
+                                Label(draft.selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Identify Element" : "Re-identify", systemImage: "viewfinder")
+                            }
+                            .disabled(validatedURL == nil)
+                        }
+
+                        if !captureValidationMessage.isEmpty {
+                            Text(captureValidationMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if !capturedText.isEmpty {
+                            Text(capturedText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                                .textSelection(.enabled)
+                        }
+
+                        if let bbox = draft.elementBoundingBox {
+                            Text("Bounds: \(formattedBoundingBox(bbox))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } header: {
                     Text("Capture")
@@ -102,10 +136,16 @@ struct TrackerEditorView: View {
         .onChange(of: draft.renderMode) { newMode in
             draft.refreshIntervalSec = newMode.defaultRefreshIntervalSec
         }
+        .sheet(item: $browserPresentation) { presentation in
+            InAppBrowserView(initialURL: presentation.url, renderMode: draft.renderMode, allowsElementIdentification: true) { pick in
+                applyCapturedElement(pick)
+            }
+            .frame(width: 1100, height: 760)
+        }
     }
 
     private var canSave: Bool {
-        !trimmedName.isEmpty && validatedURL != nil
+        !trimmedName.isEmpty && validatedURL != nil && !trimmedSelector.isEmpty && draft.elementBoundingBox != nil
     }
 
     private var trimmedName: String {
@@ -114,6 +154,10 @@ struct TrackerEditorView: View {
 
     private var trimmedURL: String {
         draft.url.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedSelector: String {
+        draft.selector.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var validatedURL: URL? {
@@ -134,6 +178,29 @@ struct TrackerEditorView: View {
         }
 
         return "Enter a valid http or https URL."
+    }
+
+    private var captureValidationMessage: String {
+        if validatedURL == nil {
+            return "Enter a valid URL before identifying an element."
+        }
+
+        if trimmedSelector.isEmpty {
+            return "Use Identify Element to capture a CSS selector before saving."
+        }
+
+        if draft.elementBoundingBox == nil {
+            return "Re-identify the element to capture its bounds."
+        }
+
+        return ""
+    }
+
+    private var readOnlySelectorBinding: Binding<String> {
+        Binding(
+            get: { draft.selector },
+            set: { _ in }
+        )
     }
 
     private var refreshIntervalRange: ClosedRange<Int> {
@@ -176,11 +243,37 @@ struct TrackerEditorView: View {
         savedTracker.icon = savedTracker.icon.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? Tracker.defaultIcon
         savedTracker.accentColorHex = accentColor.hexString ?? Tracker.defaultAccentColorHex
         savedTracker.browserProfile = Tracker.defaultBrowserProfile
-        savedTracker.selector = ""
-        savedTracker.elementBoundingBox = nil
+        savedTracker.selector = trimmedSelector
         onSave(savedTracker)
         dismiss()
     }
+
+    private func openIdentifyBrowser() {
+        guard let url = validatedURL else {
+            return
+        }
+
+        browserPresentation = IdentifyBrowserPresentation(url: url)
+    }
+
+    private func applyCapturedElement(_ pick: ElementPick) {
+        draft.selector = pick.selector
+        draft.elementBoundingBox = pick.bbox
+        capturedText = pick.text
+    }
+
+    private func formattedBoundingBox(_ bbox: ElementBoundingBox) -> String {
+        let width = Int(round(bbox.width))
+        let height = Int(round(bbox.height))
+        let x = Int(round(bbox.x))
+        let y = Int(round(bbox.y))
+        return "\(width)x\(height) at \(x), \(y)"
+    }
+}
+
+private struct IdentifyBrowserPresentation: Identifiable {
+    let id = UUID()
+    let url: URL
 }
 
 private extension String {
