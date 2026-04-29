@@ -18,6 +18,7 @@ struct NumberPlusSparklineTemplate: View {
                 .lineLimit(1)
             Text(item?.value ?? "--")
                 .font(.system(size: 38, weight: .semibold, design: .rounded))
+                .numericValueTransition()
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
             SparklineView(values: item?.sparkline ?? [], tint: item?.accent ?? .accentColor)

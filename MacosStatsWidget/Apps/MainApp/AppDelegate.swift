@@ -20,11 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.pathExtension.lowercased() == SelectorPack.fileExtension {
-            do {
-                _ = try SelectorPackImportCoordinator.importSelectorPack(at: url)
-            } catch {
-                MCPInvocationLoggerProxy.logImportFailure(error)
+        for url in urls {
+            if url.scheme == "macos-stats-widget" {
+                openDeepLink(url)
+            } else if url.pathExtension.lowercased() == SelectorPack.fileExtension {
+                do {
+                    _ = try SelectorPackImportCoordinator.importSelectorPack(at: url)
+                } catch {
+                    MCPInvocationLoggerProxy.logImportFailure(error)
+                }
             }
         }
     }
@@ -41,6 +45,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         completionHandler()
+    }
+
+    private func openDeepLink(_ url: URL) {
+        guard url.host == "tracker",
+              let trackerIDString = url.pathComponents.dropFirst().first,
+              let trackerID = UUID(uuidString: trackerIDString) else {
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        AppNavigationEvents.openTrackerSettings(trackerID: trackerID)
     }
 }
 

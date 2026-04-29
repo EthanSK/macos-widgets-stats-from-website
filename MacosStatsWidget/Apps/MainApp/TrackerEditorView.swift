@@ -124,6 +124,7 @@ struct TrackerEditorView: View {
                 Button("Cancel") {
                     dismiss()
                 }
+                .keyboardShortcut("w", modifiers: .command)
                 Button("Save") {
                     save()
                 }

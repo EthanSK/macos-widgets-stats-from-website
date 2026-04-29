@@ -23,6 +23,7 @@ struct Dashboard3UpTemplate: View {
                         .monospacedDigit()
                         .minimumScaleFactor(0.5)
                         .lineLimit(1)
+                        .numericValueTransition()
                     SparklineView(values: item.sparkline, tint: item.accent)
                         .frame(height: 24)
                     Text(item.updatedText)

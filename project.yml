@@ -38,6 +38,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-stats-widget
         INFOPLIST_FILE: MacosStatsWidget/Apps/MainApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: MacosStatsWidget/Apps/MainApp/MacosStatsWidget.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: MacosStatsWidget/Apps/MainApp/Info.plist
       properties:
@@ -56,6 +57,10 @@ targets:
             LSHandlerRank: Owner
             LSItemContentTypes:
               - com.ethansk.macos-stats-widget.selectorpack
+        CFBundleURLTypes:
+          - CFBundleURLName: MacosStatsWidget
+            CFBundleURLSchemes:
+              - macos-stats-widget
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSPrincipalClass: NSApplication

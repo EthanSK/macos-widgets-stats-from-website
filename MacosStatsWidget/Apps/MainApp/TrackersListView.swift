@@ -60,6 +60,7 @@ struct TrackersListView: View {
                 } label: {
                     Label("Add Tracker", systemImage: "plus")
                 }
+                .keyboardShortcut("n", modifiers: .command)
                 .help("Add Tracker")
 
                 Button {

@@ -18,6 +18,7 @@ struct HeadlineSparklineTemplate: View {
                     .foregroundStyle(.secondary)
                 Text(item?.value ?? "--")
                     .font(.system(size: 50, weight: .semibold, design: .rounded))
+                    .numericValueTransition()
                     .minimumScaleFactor(0.45)
                     .lineLimit(1)
                 Text(item?.updatedText ?? "not updated")

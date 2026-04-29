@@ -20,6 +20,23 @@ struct StatsWidgetEntry: TimelineEntry {
     let configuration: WidgetConfiguration?
     let trackers: [Tracker]
     let readings: [UUID: TrackerReading]
+
+    var valueFingerprint: String {
+        trackers.map { tracker in
+            let reading = readings[tracker.id]
+            return "\(tracker.id.uuidString):\(reading?.currentValue ?? ""):\(reading?.status.rawValue ?? "missing"):\(reading?.snapshotCapturedAt?.timeIntervalSince1970 ?? 0)"
+        }
+        .joined(separator: "|")
+    }
+
+    var accessibilitySummary: Text {
+        let values = trackers.map { tracker in
+            let item = WidgetTrackerItem(tracker: tracker, reading: readings[tracker.id])
+            return item.accessibilityDescription
+        }
+        .joined(separator: ", ")
+        return Text(values.isEmpty ? "macOS Stats Widget, no trackers configured" : values)
+    }
 }
 
 struct StatsWidgetProvider: IntentTimelineProvider {
@@ -111,6 +128,7 @@ struct StatsWidgetProvider: IntentTimelineProvider {
 
 struct StatsWidgetEntryView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let entry: StatsWidgetEntry
 
@@ -123,6 +141,16 @@ struct StatsWidgetEntryView: View {
             }
         }
         .widgetCompatibleBackground()
+        .dynamicTypeSize(.xSmall ... .accessibility3)
+        .overlay(alignment: .topTrailing) {
+            if let item = firstAttentionItem {
+                ErrorStateBadge(item: item)
+                    .padding(8)
+            }
+        }
+        .animation(NumberAnimation.spring(reduceMotion: reduceMotion), value: entry.valueFingerprint)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(entry.accessibilitySummary)
     }
 
     @ViewBuilder
@@ -220,6 +248,12 @@ struct StatsWidgetEntryView: View {
             .map { WidgetTrackerItem(tracker: $0, reading: entry.readings[$0.id]) }
             .first { $0.tracker.renderMode == .text }
     }
+
+    private var firstAttentionItem: WidgetTrackerItem? {
+        entry.trackers
+            .map { WidgetTrackerItem(tracker: $0, reading: entry.readings[$0.id]) }
+            .first { $0.needsAttention }
+    }
 }
 
 struct StatsWidget: Widget {
@@ -280,6 +314,19 @@ struct WidgetTrackerItem: Identifiable {
         reading?.status ?? .stale
     }
 
+    var needsAttention: Bool {
+        status == .broken
+    }
+
+    var accessibilityDescription: String {
+        let statusText = needsAttention ? "needs attention" : status.rawValue
+        return "\(title), \(value), \(statusText), updated \(updatedText)"
+    }
+
+    var deepLinkURL: URL? {
+        URL(string: "macos-stats-widget://tracker/\(tracker.id.uuidString)")
+    }
+
     var updatedText: String {
         guard let date = reading?.lastUpdatedAt else {
             return "not updated"
@@ -301,6 +348,43 @@ struct WidgetTrackerItem: Identifiable {
         }
 
         return NSImage(data: data)
+    }
+}
+
+enum NumberAnimation {
+    static func spring(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.82)
+    }
+}
+
+struct ErrorStateBadge: View {
+    let item: WidgetTrackerItem
+
+    var body: some View {
+        Group {
+            if let url = item.deepLinkURL {
+                Link(destination: url) {
+                    content
+                }
+            } else {
+                content
+            }
+        }
+        .accessibilityLabel(Text("\(item.title) needs attention"))
+    }
+
+    private var content: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(Color.red)
+                .frame(width: 7, height: 7)
+            Text("needs attention")
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: Capsule())
     }
 }
 
@@ -336,6 +420,7 @@ private struct SingleBigNumberWidgetView: View {
                 .monospacedDigit()
                 .minimumScaleFactor(0.45)
                 .lineLimit(1)
+                .numericValueTransition()
                 .foregroundStyle(statusColor)
                 .frame(maxWidth: .infinity, alignment: .center)
 
@@ -383,6 +468,7 @@ private struct NumberSparklineWidgetView: View {
                 .font(.system(size: 38, weight: .semibold, design: .rounded))
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
+                .numericValueTransition()
             SparklineView(values: item?.sparkline ?? [], tint: item?.accent ?? .accentColor)
                 .frame(height: 34)
             Text(item?.updatedText ?? "not updated")
@@ -471,7 +557,7 @@ struct SnapshotOverlay: View {
     var body: some View {
         HStack(spacing: 5) {
             Circle()
-                .fill(item?.status == .ok ? Color.green : Color.orange)
+                .fill(item?.status == .broken ? Color.red : (item?.status == .ok ? Color.green : Color.orange))
                 .frame(width: 6, height: 6)
             Text(item?.title ?? "Snapshot")
                 .lineLimit(1)
@@ -498,6 +584,7 @@ private struct GaugeRingWidgetView: View {
                 Text(item?.value ?? "--")
                     .font(.caption.weight(.semibold))
                     .minimumScaleFactor(0.5)
+                    .numericValueTransition()
             }
             .gaugeStyle(.accessoryCircular)
             .tint(gaugeTint)
@@ -545,6 +632,7 @@ private struct HeadlineSparklineWidgetView: View {
                     .font(.system(size: 50, weight: .semibold, design: .rounded))
                     .minimumScaleFactor(0.45)
                     .lineLimit(1)
+                    .numericValueTransition()
                 Text(item?.updatedText ?? "not updated")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -574,6 +662,7 @@ private struct Dashboard3UpWidgetView: View {
                         .monospacedDigit()
                         .minimumScaleFactor(0.5)
                         .lineLimit(1)
+                        .numericValueTransition()
                     SparklineView(values: item.sparkline, tint: item.accent)
                         .frame(height: 24)
                     Text(item.updatedText)
@@ -633,7 +722,16 @@ private struct SparklineShape: Shape {
     }
 }
 
-private extension View {
+extension View {
+    @ViewBuilder
+    func numericValueTransition() -> some View {
+        if #available(macOSApplicationExtension 14.0, *) {
+            contentTransition(.numericText())
+        } else {
+            self
+        }
+    }
+
     @ViewBuilder
     func widgetCompatibleBackground() -> some View {
         if #available(macOSApplicationExtension 14.0, *) {

@@ -21,6 +21,7 @@ struct HeroPlusDetailTemplate: View {
                     .monospacedDigit()
                     .minimumScaleFactor(0.4)
                     .lineLimit(1)
+                    .numericValueTransition()
             }
 
             SparklineView(values: item?.sparkline ?? [], tint: item?.accent ?? .accentColor)
@@ -79,6 +80,7 @@ private struct DetailCell: View {
                 .font(.caption.weight(.semibold))
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
+                .numericValueTransition()
         }
         .frame(maxWidth: .infinity)
     }

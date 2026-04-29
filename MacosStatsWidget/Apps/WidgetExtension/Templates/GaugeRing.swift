@@ -18,6 +18,7 @@ struct GaugeRingTemplate: View {
                 Text(item?.value ?? "--")
                     .font(.caption.weight(.semibold))
                     .minimumScaleFactor(0.5)
+                    .numericValueTransition()
             }
             .gaugeStyle(.accessoryCircular)
             .tint(gaugeTint)

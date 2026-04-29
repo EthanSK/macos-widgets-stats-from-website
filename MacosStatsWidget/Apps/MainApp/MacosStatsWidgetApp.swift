@@ -7,6 +7,7 @@
 
 import Darwin
 import Foundation
+import AppKit
 import SwiftUI
 
 @main
@@ -35,6 +36,7 @@ struct MacosStatsWidgetApp: App {
                 .environmentObject(backgroundScheduler)
                 .onAppear {
                     backgroundScheduler.sync()
+                    DockBadgeUpdater.update()
                 }
                 .onReceive(store.$trackers) { _ in
                     backgroundScheduler.sync()
@@ -42,6 +44,7 @@ struct MacosStatsWidgetApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: .mcpConfigurationChanged)) { _ in
                     store.reloadFromDisk()
                     backgroundScheduler.sync()
+                    DockBadgeUpdater.update()
                 }
                 .sheet(isPresented: $showsFirstLaunchFlow) {
                     FirstLaunchWizardView(isPresented: $showsFirstLaunchFlow)
@@ -50,6 +53,13 @@ struct MacosStatsWidgetApp: App {
         }
         .defaultSize(width: 900, height: 620)
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Preferences...") {
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+
             CommandGroup(after: .help) {
                 Button("Show First-Launch Flow") {
                     showsFirstLaunchFlow = true

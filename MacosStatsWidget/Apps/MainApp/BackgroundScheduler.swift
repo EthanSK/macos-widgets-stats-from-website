@@ -102,6 +102,7 @@ final class BackgroundScheduler: ObservableObject {
                 recordedReading = try AppGroupStore.recordFailure(message: error.localizedDescription, for: tracker)
             }
             handlePostRecord(reading: recordedReading, tracker: tracker)
+            DockBadgeUpdater.update()
             WidgetCenter.shared.reloadTimelines(ofKind: "MacosStatsWidget")
         } catch {
             // The Preferences UI surfaces configuration persistence errors;

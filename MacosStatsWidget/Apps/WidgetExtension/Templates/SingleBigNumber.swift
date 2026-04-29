@@ -22,6 +22,7 @@ struct SingleBigNumberTemplate: View {
             Text(item?.value ?? "--")
                 .font(.system(size: 48, weight: .semibold, design: .rounded))
                 .monospacedDigit()
+                .numericValueTransition()
                 .minimumScaleFactor(0.45)
                 .lineLimit(1)
                 .foregroundStyle(statusColor)

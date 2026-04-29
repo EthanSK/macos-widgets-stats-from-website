@@ -33,6 +33,7 @@ struct StatsListWatchlistTemplate: View {
                         .monospacedDigit()
                         .minimumScaleFactor(0.5)
                         .lineLimit(1)
+                        .numericValueTransition()
                         .frame(width: 86, alignment: .trailing)
                 }
                 .frame(height: 50)
