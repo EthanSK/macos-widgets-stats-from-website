@@ -12,6 +12,7 @@ final class BackgroundScheduler: ObservableObject {
     private let store: AppGroupStore
     private var schedulers: [UUID: NSBackgroundActivityScheduler] = [:]
     private var activeTrackerIDs: Set<UUID> = []
+    private var notifiedBrokenTrackerIDs: Set<UUID> = []
     private lazy var snapshotSessions = SnapshotSessionManager(
         onReading: { [weak self] tracker, reading in
             self?.record(result: .success(reading), for: tracker)
@@ -92,16 +93,34 @@ final class BackgroundScheduler: ObservableObject {
 
     private func record(result: Result<TrackerReading, Error>, for tracker: Tracker) {
         do {
+            let recordedReading: TrackerReading
             switch result {
             case .success(let reading):
                 try AppGroupStore.record(reading: reading, for: tracker)
+                recordedReading = reading
             case .failure(let error):
-                try AppGroupStore.recordFailure(message: error.localizedDescription, for: tracker)
+                recordedReading = try AppGroupStore.recordFailure(message: error.localizedDescription, for: tracker)
             }
+            handlePostRecord(reading: recordedReading, tracker: tracker)
             WidgetCenter.shared.reloadTimelines(ofKind: "MacosStatsWidget")
         } catch {
             // The Preferences UI surfaces configuration persistence errors;
             // scrape write failures are transient and retried by the scheduler.
         }
+    }
+
+    private func handlePostRecord(reading: TrackerReading, tracker: Tracker) {
+        if reading.status == .ok {
+            notifiedBrokenTrackerIDs.remove(tracker.id)
+            return
+        }
+
+        let failureCount = reading.consecutiveFailureCount ?? 0
+        guard failureCount >= 3, !notifiedBrokenTrackerIDs.contains(tracker.id) else {
+            return
+        }
+
+        notifiedBrokenTrackerIDs.insert(tracker.id)
+        HealNotifier.shared.notifyBrokenTracker(tracker, failureCount: failureCount)
     }
 }

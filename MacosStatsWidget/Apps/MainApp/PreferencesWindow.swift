@@ -33,6 +33,9 @@ struct PreferencesWindow: View {
             }
         }
         .frame(minWidth: 780, minHeight: 520)
+        .onReceive(NotificationCenter.default.publisher(for: AppNavigationEvents.openTrackerSettingsNotification)) { _ in
+            selection = .trackers
+        }
     }
 }
 

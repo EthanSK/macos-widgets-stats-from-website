@@ -102,23 +102,23 @@ final class WKWebViewScraper: NSObject, WKNavigationDelegate {
             }
 
             if let error {
-                finish(.failure(error))
+                scrapeFallbackText(in: webView, reason: error.localizedDescription)
                 return
             }
 
             guard let dictionary = result as? [String: Any] else {
-                finish(.failure(WKWebViewScraperError.selectorDidNotMatch))
+                scrapeFallbackText(in: webView, reason: WKWebViewScraperError.selectorDidNotMatch.localizedDescription)
                 return
             }
 
             if let ok = dictionary["ok"] as? Bool, ok == false {
-                finish(.failure(WKWebViewScraperError.selectorDidNotMatch))
+                scrapeFallbackText(in: webView, reason: WKWebViewScraperError.selectorDidNotMatch.localizedDescription)
                 return
             }
 
             let value = (dictionary["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else {
-                finish(.failure(WKWebViewScraperError.selectedElementHasNoText))
+                scrapeFallbackText(in: webView, reason: WKWebViewScraperError.selectedElementHasNoText.localizedDescription)
                 return
             }
 
@@ -127,6 +127,47 @@ final class WKWebViewScraper: NSObject, WKNavigationDelegate {
                 currentNumeric: tracker.valueParser.parseNumeric(from: value),
                 lastUpdatedAt: Date(),
                 status: .ok
+            )
+            finish(.success(reading))
+        }
+    }
+
+    private func scrapeFallbackText(in webView: WKWebView, reason: String) {
+        guard AppGroupStore.loadAppGroupConfiguration().preferences.selfHeal.regexFallbackEnabled else {
+            finish(.failure(WKWebViewScraperError.selectorDidNotMatch))
+            return
+        }
+
+        webView.evaluateJavaScript("document.body ? String(document.body.innerText || document.body.textContent || '') : ''") { [weak self] result, _ in
+            guard let self else {
+                return
+            }
+
+            let pageText = result as? String ?? ""
+            let previousValue = AppGroupStore.reading(for: tracker.id)?.currentValue
+            guard let fallbackValue = RegexFallback.bestValue(in: pageText, previousValue: previousValue) else {
+                finish(.failure(WKWebViewScraperError.selectorDidNotMatch))
+                return
+            }
+
+            let existingFailureCount = AppGroupStore.reading(for: tracker.id)?.consecutiveFailureCount ?? 0
+            let failureCount = existingFailureCount + 1
+            let status: TrackerStatus = failureCount >= 3 ? .broken : .stale
+            AuditLog.record(
+                trackerID: tracker.id,
+                beforeSelector: tracker.selector,
+                afterSelector: nil,
+                outcome: "regex_fallback_value",
+                source: "scraper"
+            )
+
+            let reading = TrackerReading(
+                currentValue: fallbackValue,
+                currentNumeric: tracker.valueParser.parseNumeric(from: fallbackValue),
+                lastUpdatedAt: Date(),
+                status: status,
+                lastError: "Selector failed; showing regex fallback: \(reason)",
+                consecutiveFailureCount: failureCount
             )
             finish(.success(reading))
         }

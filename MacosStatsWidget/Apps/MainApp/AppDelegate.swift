@@ -6,9 +6,25 @@
 //
 
 import AppKit
+import UserNotifications
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // TODO: Wire menu bar and dock behavior in a later rollout.
+        UNUserNotificationCenter.current().delegate = self
+        HealNotifier.shared.configure()
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if let trackerIDString = response.notification.request.content.userInfo["trackerID"] as? String,
+           let trackerID = UUID(uuidString: trackerIDString) {
+            NSApp.activate(ignoringOtherApps: true)
+            AppNavigationEvents.openTrackerSettings(trackerID: trackerID)
+        }
+
+        completionHandler()
     }
 }

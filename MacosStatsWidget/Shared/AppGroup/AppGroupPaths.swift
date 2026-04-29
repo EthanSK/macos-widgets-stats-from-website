@@ -12,6 +12,7 @@ enum AppGroupPaths {
     static let applicationSupportDirectoryName = "macOS Stats Widget"
     static let trackersFileName = "trackers.json"
     static let readingsFileName = "readings.json"
+    static let auditLogFileName = "audit-log.json"
 
     static func sharedContainerURL() -> URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
@@ -34,4 +35,7 @@ enum AppGroupPaths {
         sharedContainerURL()?.appendingPathComponent(readingsFileName, isDirectory: false)
     }
 
+    static func appGroupAuditLogURL() -> URL? {
+        sharedContainerURL()?.appendingPathComponent(auditLogFileName, isDirectory: false)
+    }
 }

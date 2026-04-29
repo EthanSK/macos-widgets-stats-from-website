@@ -161,6 +161,12 @@ final class AppGroupStore: ObservableObject {
         let existingSparkline = file.readings[key]?.sparkline ?? []
         var reading = newReading
 
+        if reading.status == .ok {
+            reading.consecutiveFailureCount = 0
+        } else if reading.consecutiveFailureCount == nil {
+            reading.consecutiveFailureCount = file.readings[key]?.consecutiveFailureCount ?? 0
+        }
+
         if let numeric = reading.currentNumeric {
             let displayWindow = max(1, tracker.history.displayWindow)
             reading.sparkline = Array((existingSparkline + [numeric]).suffix(displayWindow))
@@ -173,9 +179,10 @@ final class AppGroupStore: ObservableObject {
         try write(readingsFile: file)
     }
 
-    static func recordFailure(message: String, for tracker: Tracker) throws {
+    @discardableResult
+    static func recordFailure(message: String, for tracker: Tracker) throws -> TrackerReading {
         let existing = reading(for: tracker.id)
-        let failureCount = (existing?.status == .broken ? 3 : 1)
+        let failureCount = (existing?.consecutiveFailureCount ?? 0) + 1
         let status: TrackerStatus = failureCount >= 3 ? .broken : .stale
         let reading = TrackerReading(
             currentValue: existing?.currentValue,
@@ -186,9 +193,11 @@ final class AppGroupStore: ObservableObject {
             lastUpdatedAt: existing?.lastUpdatedAt,
             status: status,
             sparkline: existing?.sparkline ?? [],
-            lastError: message
+            lastError: message,
+            consecutiveFailureCount: failureCount
         )
         try record(reading: reading, for: tracker)
+        return reading
     }
 
     private static func loadConfiguration() -> AppConfiguration {

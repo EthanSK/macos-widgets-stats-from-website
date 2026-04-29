@@ -75,10 +75,32 @@ struct TrackersListView: View {
         }
         .sheet(item: $editorPresentation) { presentation in
             TrackerEditorView(mode: presentation.mode, tracker: presentation.tracker) { savedTracker in
+                if let existing = store.trackers.first(where: { $0.id == savedTracker.id }),
+                   existing.selector != savedTracker.selector {
+                    AuditLog.record(
+                        trackerID: savedTracker.id,
+                        beforeSelector: existing.selector,
+                        afterSelector: savedTracker.selector,
+                        outcome: "user_reidentified",
+                        source: "main_app"
+                    )
+                }
                 store.upsertTracker(savedTracker)
                 selectedTrackerID = savedTracker.id
             }
             .frame(width: 500)
+        }
+        .onAppear {
+            if let trackerID = AppNavigationEvents.consumePendingTrackerID() {
+                openTrackerSettings(trackerID: trackerID)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AppNavigationEvents.openTrackerSettingsNotification)) { notification in
+            guard let trackerID = notification.userInfo?["trackerID"] as? UUID else {
+                return
+            }
+
+            openTrackerSettings(trackerID: trackerID)
         }
         .overlay(alignment: .bottomLeading) {
             if let error = store.lastPersistenceError {
@@ -129,6 +151,15 @@ struct TrackersListView: View {
         }
 
         store.deleteTracker(id: tracker.id)
+    }
+
+    private func openTrackerSettings(trackerID: UUID) {
+        guard let tracker = store.trackers.first(where: { $0.id == trackerID }) else {
+            return
+        }
+
+        selectedTrackerID = trackerID
+        editorPresentation = TrackerEditorPresentation(mode: .edit, tracker: tracker)
     }
 }
 

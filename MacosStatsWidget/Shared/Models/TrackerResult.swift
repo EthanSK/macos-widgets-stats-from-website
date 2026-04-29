@@ -23,6 +23,7 @@ struct TrackerReading: Codable, Equatable {
     var status: TrackerStatus
     var sparkline: [Double]
     var lastError: String?
+    var consecutiveFailureCount: Int?
 
     init(
         currentValue: String? = nil,
@@ -33,7 +34,8 @@ struct TrackerReading: Codable, Equatable {
         lastUpdatedAt: Date? = Date(),
         status: TrackerStatus = .ok,
         sparkline: [Double] = [],
-        lastError: String? = nil
+        lastError: String? = nil,
+        consecutiveFailureCount: Int? = 0
     ) {
         self.currentValue = currentValue
         self.currentNumeric = currentNumeric
@@ -44,6 +46,7 @@ struct TrackerReading: Codable, Equatable {
         self.status = status
         self.sparkline = sparkline
         self.lastError = lastError
+        self.consecutiveFailureCount = consecutiveFailureCount
     }
 }
 

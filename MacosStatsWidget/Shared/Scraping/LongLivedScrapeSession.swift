@@ -291,9 +291,7 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
                     return
                 }
 
-                let resolvedRect = self.rect(from: result)
-                let fallbackRect = self.cachedRect
-                guard let rect = resolvedRect ?? fallbackRect,
+                guard let rect = self.rect(from: result),
                       rect.width > 0,
                       rect.height > 0 else {
                     self.finishSnapshotFailure(WKWebViewScraperError.selectedElementHasNoVisibleRect)
