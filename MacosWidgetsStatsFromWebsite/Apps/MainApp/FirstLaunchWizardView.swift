@@ -125,9 +125,9 @@ struct FirstLaunchWizardView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Picker("First widget", selection: $widgetTemplate) {
+                    Picker("First widget layout", selection: $widgetTemplate) {
                         ForEach(availableWidgetTemplates, id: \.rawValue) { template in
-                            Text(template.displayName).tag(template)
+                            Text("\(template.displayName) — \(template.size.displayName)").tag(template)
                         }
                     }
 
@@ -180,7 +180,7 @@ struct FirstLaunchWizardView: View {
                             }
                             .padding(.top, 4)
                         } else {
-                            Text("In the browser, sign in if needed, click Identify Element, hover the value or region, then click to preview and use it.")
+                            Text("Required before saving: in the browser, sign in if needed, click Identify Element, hover the value or region, then click to preview and use it.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -200,6 +200,10 @@ struct FirstLaunchWizardView: View {
                 Text(errorMessage)
                     .font(.caption)
                     .foregroundStyle(.red)
+            } else if let saveReadinessMessage {
+                Text(saveReadinessMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 12)
@@ -216,7 +220,7 @@ struct FirstLaunchWizardView: View {
                 Button("Save Tracker") {
                     saveFirstTracker()
                 }
-                .disabled(!canSaveTracker)
+                .disabled(selectedURL == nil || trimmedTrackerName.isEmpty)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -288,11 +292,27 @@ struct FirstLaunchWizardView: View {
     }
 
     private var widgetTemplateHelp: String {
-        "Creates a \(widgetTemplate.size.displayName.lowercased()) \(widgetTemplate.displayName) widget configuration after saving."
+        "Creates a \(widgetTemplate.size.displayName.lowercased()) widget using \(widgetTemplate.displayName). These first-widget choices are the one-tracker layouts; you can build multi-stat widgets later in Preferences."
+    }
+
+    private var saveReadinessMessage: String? {
+        if selectedURL == nil {
+            return "Enter and continue with a URL before saving."
+        }
+
+        if trimmedTrackerName.isEmpty {
+            return "Name the tracker before saving."
+        }
+
+        if capturedPick == nil {
+            return "Open the page and identify the value or region before saving the tracker."
+        }
+
+        return nil
     }
 
     private var canSaveTracker: Bool {
-        selectedURL != nil && !trimmedTrackerName.isEmpty && capturedPick != nil
+        saveReadinessMessage == nil
     }
 
     private func continueWithURL() {
