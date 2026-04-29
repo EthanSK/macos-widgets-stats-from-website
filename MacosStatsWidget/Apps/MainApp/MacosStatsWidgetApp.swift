@@ -2,7 +2,7 @@
 //  MacosStatsWidgetApp.swift
 //  MacosStatsWidget
 //
-//  v0.1 stub — see PLAN.md §4 for the full design.
+//  App entry and scene wiring.
 //
 
 import SwiftUI
@@ -10,10 +10,13 @@ import SwiftUI
 @main
 struct MacosStatsWidgetApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var store = AppGroupStore()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(store)
         }
+        .defaultSize(width: 900, height: 620)
     }
 }
