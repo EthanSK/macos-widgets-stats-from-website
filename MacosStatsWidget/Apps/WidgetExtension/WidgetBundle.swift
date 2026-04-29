@@ -11,6 +11,6 @@ import WidgetKit
 @main
 struct MacosStatsWidgetBundle: WidgetBundle {
     var body: some Widget {
-        PlaceholderWidget()
+        StatsWidget()
     }
 }

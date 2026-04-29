@@ -1,0 +1,507 @@
+//
+//  StatsWidget.swift
+//  MacosStatsWidgetWidget
+//
+//  App Group backed WidgetKit renderer.
+//
+
+import Intents
+import SwiftUI
+import WidgetKit
+
+@objc(StatsWidgetConfigurationIntent)
+final class StatsWidgetConfigurationIntent: INIntent {
+    @NSManaged var configurationID: String?
+}
+
+struct StatsWidgetEntry: TimelineEntry {
+    let date: Date
+    let configuration: WidgetConfiguration?
+    let trackers: [Tracker]
+    let readings: [UUID: TrackerReading]
+}
+
+struct StatsWidgetProvider: IntentTimelineProvider {
+    typealias Intent = StatsWidgetConfigurationIntent
+
+    func placeholder(in context: Context) -> StatsWidgetEntry {
+        StatsWidgetEntry(
+            date: Date(),
+            configuration: WidgetConfiguration(
+                name: "Codex Only",
+                templateID: .singleBigNumber,
+                trackerIDs: []
+            ),
+            trackers: [
+                Tracker(
+                    name: "Codex",
+                    url: "https://platform.openai.com/usage",
+                    selector: "body",
+                    label: "Codex",
+                    accentColorHex: Tracker.defaultAccentColorHex
+                )
+            ],
+            readings: [:]
+        )
+    }
+
+    func getSnapshot(
+        for configuration: StatsWidgetConfigurationIntent,
+        in context: Context,
+        completion: @escaping (StatsWidgetEntry) -> Void
+    ) {
+        completion(makeEntry(for: configuration))
+    }
+
+    func getTimeline(
+        for configuration: StatsWidgetConfigurationIntent,
+        in context: Context,
+        completion: @escaping (Timeline<StatsWidgetEntry>) -> Void
+    ) {
+        let entry = makeEntry(for: configuration)
+        let nextDate = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
+        completion(Timeline(entries: [entry], policy: .after(nextDate)))
+    }
+
+    private func makeEntry(for intent: StatsWidgetConfigurationIntent) -> StatsWidgetEntry {
+        let appConfiguration = AppGroupStore.loadAppGroupConfiguration()
+        let readingsFile = AppGroupStore.loadReadings()
+        let selectedConfiguration = selectConfiguration(from: appConfiguration, intent: intent)
+        let trackerIDs = selectedConfiguration?.trackerIDs ?? appConfiguration.trackers.prefix(1).map(\.id)
+        let trackers = trackerIDs.compactMap { id in
+            appConfiguration.trackers.first { $0.id == id }
+        }
+        let readings = Dictionary(uniqueKeysWithValues: readingsFile.readings.compactMap { key, value in
+            UUID(uuidString: key).map { ($0, value) }
+        })
+
+        return StatsWidgetEntry(
+            date: Date(),
+            configuration: selectedConfiguration,
+            trackers: trackers,
+            readings: readings
+        )
+    }
+
+    private func selectConfiguration(from appConfiguration: AppConfiguration, intent: StatsWidgetConfigurationIntent) -> WidgetConfiguration? {
+        if let configurationID = intent.configurationID,
+           let id = UUID(uuidString: configurationID.trimmingCharacters(in: .whitespacesAndNewlines)),
+           let match = appConfiguration.widgetConfigurations.first(where: { $0.id == id }) {
+            return match
+        }
+
+        if let first = appConfiguration.widgetConfigurations.first {
+            return first
+        }
+
+        guard let tracker = appConfiguration.trackers.first else {
+            return nil
+        }
+
+        return WidgetConfiguration(
+            name: tracker.label ?? tracker.name,
+            templateID: .singleBigNumber,
+            size: .small,
+            layout: .single,
+            trackerIDs: [tracker.id]
+        )
+    }
+}
+
+struct StatsWidgetEntryView: View {
+    @Environment(\.widgetFamily) private var family
+
+    let entry: StatsWidgetEntry
+
+    var body: some View {
+        Group {
+            if entry.trackers.isEmpty {
+                EmptyWidgetView()
+            } else {
+                templateView
+            }
+        }
+        .widgetCompatibleBackground()
+    }
+
+    @ViewBuilder
+    private var templateView: some View {
+        switch entry.configuration?.templateID ?? defaultTemplate {
+        case .singleBigNumber:
+            SingleBigNumberWidgetView(item: item(at: 0))
+        case .numberPlusSparkline:
+            NumberSparklineWidgetView(item: item(at: 0))
+        case .gaugeRing:
+            GaugeRingWidgetView(item: item(at: 0))
+        case .headlineSparkline:
+            HeadlineSparklineWidgetView(item: item(at: 0))
+        case .dashboard3Up:
+            Dashboard3UpWidgetView(items: items(limit: 3))
+        default:
+            fallbackView
+        }
+    }
+
+    @ViewBuilder
+    private var fallbackView: some View {
+        switch family {
+        case .systemMedium:
+            Dashboard3UpWidgetView(items: items(limit: 3))
+        default:
+            SingleBigNumberWidgetView(item: item(at: 0))
+        }
+    }
+
+    private var defaultTemplate: WidgetTemplate {
+        switch family {
+        case .systemMedium:
+            return .dashboard3Up
+        default:
+            return .singleBigNumber
+        }
+    }
+
+    private func item(at index: Int) -> WidgetTrackerItem? {
+        guard entry.trackers.indices.contains(index) else {
+            return nil
+        }
+
+        let tracker = entry.trackers[index]
+        return WidgetTrackerItem(tracker: tracker, reading: entry.readings[tracker.id])
+    }
+
+    private func items(limit: Int) -> [WidgetTrackerItem] {
+        entry.trackers.prefix(limit).map { tracker in
+            WidgetTrackerItem(tracker: tracker, reading: entry.readings[tracker.id])
+        }
+    }
+}
+
+struct StatsWidget: Widget {
+    private let kind = "MacosStatsWidget"
+
+    var body: some SwiftUI.WidgetConfiguration {
+        IntentConfiguration(kind: kind, intent: StatsWidgetConfigurationIntent.self, provider: StatsWidgetProvider()) { entry in
+            StatsWidgetEntryView(entry: entry)
+        }
+        .configurationDisplayName("macOS Stats Widget")
+        .description("Show tracked page values from the main app.")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+    }
+}
+
+private struct WidgetTrackerItem: Identifiable {
+    let tracker: Tracker
+    let reading: TrackerReading?
+
+    var id: UUID {
+        tracker.id
+    }
+
+    var title: String {
+        tracker.label?.isEmpty == false ? tracker.label! : tracker.name
+    }
+
+    var value: String {
+        if let currentValue = reading?.currentValue, !currentValue.isEmpty {
+            return currentValue
+        }
+
+        switch reading?.status {
+        case .broken:
+            return "?"
+        default:
+            return "--"
+        }
+    }
+
+    var numeric: Double? {
+        reading?.currentNumeric
+    }
+
+    var sparkline: [Double] {
+        reading?.sparkline ?? []
+    }
+
+    var status: TrackerStatus {
+        reading?.status ?? .stale
+    }
+
+    var updatedText: String {
+        guard let date = reading?.lastUpdatedAt else {
+            return "not updated"
+        }
+
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    var accent: Color {
+        Color(hexString: tracker.accentColorHex) ?? .accentColor
+    }
+}
+
+private struct EmptyWidgetView: View {
+    var body: some View {
+        VStack(spacing: 6) {
+            Text("macOS Stats Widget")
+                .font(.headline)
+            Text("No trackers configured")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+}
+
+private struct SingleBigNumberWidgetView: View {
+    let item: WidgetTrackerItem?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item?.title ?? "Tracker")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            Text(item?.value ?? "--")
+                .font(.system(size: 48, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .minimumScaleFactor(0.45)
+                .lineLimit(1)
+                .foregroundStyle(statusColor)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 4) {
+                Image(systemName: item?.status == .ok ? "arrow.clockwise" : "exclamationmark.triangle.fill")
+                Text(item?.updatedText ?? "not updated")
+                    .lineLimit(1)
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var statusColor: Color {
+        switch item?.status {
+        case .broken:
+            return .red
+        case .stale, nil:
+            return .secondary
+        case .ok:
+            return .primary
+        }
+    }
+
+    private var accessibilityLabel: Text {
+        Text("\(item?.title ?? "Tracker"), \(item?.value ?? "no value"), updated \(item?.updatedText ?? "never")")
+    }
+}
+
+private struct NumberSparklineWidgetView: View {
+    let item: WidgetTrackerItem?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item?.title ?? "Tracker")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(item?.value ?? "--")
+                .font(.system(size: 38, weight: .semibold, design: .rounded))
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
+            SparklineView(values: item?.sparkline ?? [], tint: item?.accent ?? .accentColor)
+                .frame(height: 34)
+            Text(item?.updatedText ?? "not updated")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+    }
+}
+
+private struct GaugeRingWidgetView: View {
+    let item: WidgetTrackerItem?
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Gauge(value: gaugeValue, in: 0...1) {
+                Text(item?.title ?? "Tracker")
+            } currentValueLabel: {
+                Text(item?.value ?? "--")
+                    .font(.caption.weight(.semibold))
+                    .minimumScaleFactor(0.5)
+            }
+            .gaugeStyle(.accessoryCircular)
+            .tint(gaugeTint)
+            .frame(width: 92, height: 92)
+
+            Text(item?.title ?? "Tracker")
+                .font(.caption)
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(12)
+    }
+
+    private var gaugeValue: Double {
+        guard let numeric = item?.numeric else {
+            return 0
+        }
+
+        return min(max(numeric / 100, 0), 1)
+    }
+
+    private var gaugeTint: Color {
+        switch gaugeValue {
+        case ..<0.7:
+            return .green
+        case ..<0.9:
+            return .orange
+        default:
+            return .red
+        }
+    }
+}
+
+private struct HeadlineSparklineWidgetView: View {
+    let item: WidgetTrackerItem?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(item?.title ?? "Tracker")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(item?.value ?? "--")
+                    .font(.system(size: 50, weight: .semibold, design: .rounded))
+                    .minimumScaleFactor(0.45)
+                    .lineLimit(1)
+                Text(item?.updatedText ?? "not updated")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            SparklineView(values: item?.sparkline ?? [], tint: item?.accent ?? .accentColor)
+                .frame(width: 130, height: 90)
+        }
+        .padding(14)
+    }
+}
+
+private struct Dashboard3UpWidgetView: View {
+    let items: [WidgetTrackerItem]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(item.title)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text(item.value)
+                        .font(.system(size: 24, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.5)
+                        .lineLimit(1)
+                    SparklineView(values: item.sparkline, tint: item.accent)
+                        .frame(height: 24)
+                    Text(item.updatedText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+
+                if index < items.count - 1 {
+                    Divider()
+                }
+            }
+        }
+        .padding(.vertical, 14)
+    }
+}
+
+private struct SparklineView: View {
+    let values: [Double]
+    let tint: Color
+
+    var body: some View {
+        SparklineShape(values: values)
+            .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .background(
+                SparklineShape(values: values)
+                    .fill(tint.opacity(0.12))
+            )
+    }
+}
+
+private struct SparklineShape: Shape {
+    let values: [Double]
+
+    func path(in rect: CGRect) -> Path {
+        guard values.count > 1,
+              let minValue = values.min(),
+              let maxValue = values.max(),
+              minValue != maxValue else {
+            var path = Path()
+            path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            return path
+        }
+
+        let spread = maxValue - minValue
+        var path = Path()
+        for (index, value) in values.enumerated() {
+            let x = rect.minX + rect.width * CGFloat(index) / CGFloat(values.count - 1)
+            let y = rect.maxY - rect.height * CGFloat((value - minValue) / spread)
+            let point = CGPoint(x: x, y: y)
+            index == 0 ? path.move(to: point) : path.addLine(to: point)
+        }
+        return path
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func widgetCompatibleBackground() -> some View {
+        if #available(macOSApplicationExtension 14.0, *) {
+            containerBackground(.background, for: .widget)
+        } else {
+            background(Color(nsColor: .windowBackgroundColor))
+        }
+    }
+}
+
+private extension Color {
+    init?(hexString: String) {
+        var value = hexString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("#") {
+            value.removeFirst()
+        }
+
+        guard value.count == 6, let hex = Int(value, radix: 16) else {
+            return nil
+        }
+
+        let red = Double((hex >> 16) & 0xff) / 255.0
+        let green = Double((hex >> 8) & 0xff) / 255.0
+        let blue = Double(hex & 0xff) / 255.0
+        self.init(red: red, green: green, blue: blue)
+    }
+}

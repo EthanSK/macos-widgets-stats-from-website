@@ -158,7 +158,18 @@ final class AppGroupStore: ObservableObject {
     }
 
     private static func loadConfiguration() -> AppConfiguration {
-        let url = AppGroupPaths.canonicalTrackersURL()
+        loadConfiguration(from: AppGroupPaths.canonicalTrackersURL())
+    }
+
+    static func loadAppGroupConfiguration() -> AppConfiguration {
+        guard let url = AppGroupPaths.appGroupTrackersURL() else {
+            return .empty
+        }
+
+        return loadConfiguration(from: url)
+    }
+
+    private static func loadConfiguration(from url: URL) -> AppConfiguration {
 
         guard let data = try? Data(contentsOf: url) else {
             return AppConfiguration.empty
