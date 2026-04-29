@@ -15,8 +15,8 @@
 
 ## 1. Vision & problem statement
 
-I keep refreshing the Codex usage page, the Claude Code spend page, the OpenAI
-dashboard, and a couple of other "what's my number right now" pages. Each one
+I keep refreshing analytics dashboards, billing pages, storefront stats, and a
+couple of other "what's my number right now" pages. Each one
 is a tab, a cookie, a sign-in, and twenty seconds of friction. The numbers
 themselves are tiny — one to four digits — but the act of fetching them
 breaks flow several times a day.
@@ -335,7 +335,7 @@ widget reads, written atomically by the main app):
     },
     {
       "id": "1a4c6b9e-…",
-      "name": "Codex Only",
+      "name": "Primary KPI",
       "templateID": "single-big-number",
       "size": "small",
       "layout": "single",

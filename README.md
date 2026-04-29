@@ -10,7 +10,7 @@
 [![Latest release](https://img.shields.io/github/v/release/EthanSK/macos-widgets-stats-from-website?include_prereleases&sort=semver&label=release&color=ffe27a)](https://github.com/EthanSK/macos-widgets-stats-from-website/releases)
 
 A native macOS WidgetKit app that surfaces scraped values from any web page you
-log into — Codex usage, Claude Code spend, OpenAI dashboard, your AWS bill,
+log into — analytics dashboards, billing pages, storefront stats, your AWS bill,
 your bank balance, anything that has a number or visual region on a page.
 Configure it once with a click-to-pick element flow, and the widget keeps
 refreshing in the background.
