@@ -17,6 +17,7 @@ struct TrackerReading: Codable, Equatable {
     var currentValue: String?
     var currentNumeric: Double?
     var snapshotPath: String?
+    var snapshotCacheKey: String?
     var snapshotCapturedAt: Date?
     var lastUpdatedAt: Date?
     var status: TrackerStatus
@@ -27,6 +28,7 @@ struct TrackerReading: Codable, Equatable {
         currentValue: String? = nil,
         currentNumeric: Double? = nil,
         snapshotPath: String? = nil,
+        snapshotCacheKey: String? = nil,
         snapshotCapturedAt: Date? = nil,
         lastUpdatedAt: Date? = Date(),
         status: TrackerStatus = .ok,
@@ -36,6 +38,7 @@ struct TrackerReading: Codable, Equatable {
         self.currentValue = currentValue
         self.currentNumeric = currentNumeric
         self.snapshotPath = snapshotPath
+        self.snapshotCacheKey = snapshotCacheKey
         self.snapshotCapturedAt = snapshotCapturedAt
         self.lastUpdatedAt = lastUpdatedAt
         self.status = status

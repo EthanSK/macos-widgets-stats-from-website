@@ -12,7 +12,6 @@ enum AppGroupPaths {
     static let applicationSupportDirectoryName = "macOS Stats Widget"
     static let trackersFileName = "trackers.json"
     static let readingsFileName = "readings.json"
-    static let snapshotsDirectoryName = "snapshots"
 
     static func sharedContainerURL() -> URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
@@ -35,15 +34,4 @@ enum AppGroupPaths {
         sharedContainerURL()?.appendingPathComponent(readingsFileName, isDirectory: false)
     }
 
-    static func snapshotsDirectoryURL() -> URL? {
-        sharedContainerURL()?.appendingPathComponent(snapshotsDirectoryName, isDirectory: true)
-    }
-
-    static func snapshotURL(for trackerID: UUID) -> URL? {
-        snapshotsDirectoryURL()?.appendingPathComponent("\(trackerID.uuidString).png", isDirectory: false)
-    }
-
-    static func relativeSnapshotPath(for trackerID: UUID) -> String {
-        "\(snapshotsDirectoryName)/\(trackerID.uuidString).png"
-    }
 }

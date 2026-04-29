@@ -148,6 +148,7 @@ final class AppGroupStore: ObservableObject {
             currentValue: existing?.currentValue,
             currentNumeric: existing?.currentNumeric,
             snapshotPath: existing?.snapshotPath,
+            snapshotCacheKey: existing?.snapshotCacheKey,
             snapshotCapturedAt: existing?.snapshotCapturedAt,
             lastUpdatedAt: existing?.lastUpdatedAt,
             status: status,

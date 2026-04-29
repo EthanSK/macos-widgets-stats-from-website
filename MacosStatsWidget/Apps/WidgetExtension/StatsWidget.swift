@@ -5,6 +5,7 @@
 //  App Group backed WidgetKit renderer.
 //
 
+import AppKit
 import Intents
 import SwiftUI
 import WidgetKit
@@ -133,10 +134,16 @@ struct StatsWidgetEntryView: View {
             NumberSparklineWidgetView(item: item(at: 0))
         case .gaugeRing:
             GaugeRingWidgetView(item: item(at: 0))
+        case .liveSnapshotTile:
+            LiveSnapshotTileWidgetView(item: item(at: 0))
         case .headlineSparkline:
             HeadlineSparklineWidgetView(item: item(at: 0))
         case .dashboard3Up:
             Dashboard3UpWidgetView(items: items(limit: 3))
+        case .snapshotPlusStat:
+            SnapshotPlusStatWidgetView(snapshotItem: snapshotItem(), textItem: textItem(excluding: snapshotItem()?.id))
+        case .liveSnapshotHero:
+            LiveSnapshotHeroWidgetView(item: item(at: 0))
         default:
             fallbackView
         }
@@ -144,11 +151,20 @@ struct StatsWidgetEntryView: View {
 
     @ViewBuilder
     private var fallbackView: some View {
-        switch family {
-        case .systemMedium:
-            Dashboard3UpWidgetView(items: items(limit: 3))
-        default:
-            SingleBigNumberWidgetView(item: item(at: 0))
+        if item(at: 0)?.tracker.renderMode == .snapshot {
+            switch family {
+            case .systemLarge:
+                LiveSnapshotHeroWidgetView(item: item(at: 0))
+            default:
+                LiveSnapshotTileWidgetView(item: item(at: 0))
+            }
+        } else {
+            switch family {
+            case .systemMedium:
+                Dashboard3UpWidgetView(items: items(limit: 3))
+            default:
+                SingleBigNumberWidgetView(item: item(at: 0))
+            }
         }
     }
 
@@ -174,6 +190,19 @@ struct StatsWidgetEntryView: View {
         entry.trackers.prefix(limit).map { tracker in
             WidgetTrackerItem(tracker: tracker, reading: entry.readings[tracker.id])
         }
+    }
+
+    private func snapshotItem() -> WidgetTrackerItem? {
+        entry.trackers
+            .map { WidgetTrackerItem(tracker: $0, reading: entry.readings[$0.id]) }
+            .first { $0.tracker.renderMode == .snapshot }
+    }
+
+    private func textItem(excluding excludedID: UUID?) -> WidgetTrackerItem? {
+        entry.trackers
+            .filter { $0.id != excludedID }
+            .map { WidgetTrackerItem(tracker: $0, reading: entry.readings[$0.id]) }
+            .first { $0.tracker.renderMode == .text }
     }
 }
 
@@ -239,6 +268,15 @@ private struct WidgetTrackerItem: Identifiable {
 
     var accent: Color {
         Color(hexString: tracker.accentColorHex) ?? .accentColor
+    }
+
+    var snapshotImage: NSImage? {
+        guard tracker.renderMode == .snapshot,
+              let data = SnapshotSharedCache.shared.data(for: tracker.id) else {
+            return nil
+        }
+
+        return NSImage(data: data)
     }
 }
 
@@ -328,6 +366,100 @@ private struct NumberSparklineWidgetView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(14)
+    }
+}
+
+private struct LiveSnapshotTileWidgetView: View {
+    let item: WidgetTrackerItem?
+
+    var body: some View {
+        SnapshotImageView(item: item, cornerRadius: 4)
+            .overlay(alignment: .bottomLeading) {
+                SnapshotOverlay(item: item)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .padding(6)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text("\(item?.title ?? "Snapshot tracker"), updated \(item?.updatedText ?? "never")"))
+    }
+}
+
+private struct LiveSnapshotHeroWidgetView: View {
+    let item: WidgetTrackerItem?
+
+    var body: some View {
+        SnapshotImageView(item: item, cornerRadius: 0)
+            .overlay(alignment: .topLeading) {
+                SnapshotOverlay(item: item)
+                    .padding(10)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text("\(item?.title ?? "Snapshot tracker"), updated \(item?.updatedText ?? "never")"))
+    }
+}
+
+private struct SnapshotPlusStatWidgetView: View {
+    let snapshotItem: WidgetTrackerItem?
+    let textItem: WidgetTrackerItem?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            LiveSnapshotTileWidgetView(item: snapshotItem)
+                .frame(width: 142)
+
+            SingleBigNumberWidgetView(item: textItem)
+                .padding(.vertical, -8)
+        }
+        .padding(8)
+    }
+}
+
+private struct SnapshotImageView: View {
+    let item: WidgetTrackerItem?
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        Group {
+            if let image = item?.snapshotImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                VStack(spacing: 6) {
+                    Image(systemName: "photo")
+                        .font(.title2)
+                    Text("No snapshot")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.secondary.opacity(0.08))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+}
+
+private struct SnapshotOverlay: View {
+    let item: WidgetTrackerItem?
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(item?.status == .ok ? Color.green : Color.orange)
+                .frame(width: 6, height: 6)
+            Text(item?.title ?? "Snapshot")
+                .lineLimit(1)
+            Text(item?.updatedText ?? "")
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption2.weight(.medium))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: Capsule())
+        .padding(6)
     }
 }
 

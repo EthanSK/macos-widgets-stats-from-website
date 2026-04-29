@@ -16,7 +16,6 @@ enum WKWebViewScraperError: LocalizedError {
     case selectedElementHasNoText
     case selectedElementHasNoVisibleRect
     case snapshotEncodingFailed
-    case snapshotWriteUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -32,8 +31,6 @@ enum WKWebViewScraperError: LocalizedError {
             return "Selected element has no visible rect."
         case .snapshotEncodingFailed:
             return "Snapshot image could not be encoded as PNG."
-        case .snapshotWriteUnavailable:
-            return "Snapshot path is unavailable."
         }
     }
 }
@@ -172,21 +169,11 @@ final class WKWebViewScraper: NSObject, WKNavigationDelegate {
                     return
                 }
 
-                guard let snapshotURL = AppGroupPaths.snapshotURL(for: tracker.id) else {
-                    finish(.failure(WKWebViewScraperError.snapshotWriteUnavailable))
-                    return
-                }
-
                 do {
-                    try FileManager.default.createDirectory(
-                        at: snapshotURL.deletingLastPathComponent(),
-                        withIntermediateDirectories: true,
-                        attributes: nil
-                    )
-                    try data.write(to: snapshotURL, options: .atomic)
+                    let cacheKey = try SnapshotSharedCache.shared.store(data, for: tracker.id)
                     let now = Date()
                     let reading = TrackerReading(
-                        snapshotPath: AppGroupPaths.relativeSnapshotPath(for: tracker.id),
+                        snapshotCacheKey: cacheKey,
                         snapshotCapturedAt: now,
                         lastUpdatedAt: now,
                         status: .ok

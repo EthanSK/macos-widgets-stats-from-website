@@ -12,6 +12,14 @@ final class BackgroundScheduler: ObservableObject {
     private let store: AppGroupStore
     private var schedulers: [UUID: NSBackgroundActivityScheduler] = [:]
     private var activeTrackerIDs: Set<UUID> = []
+    private lazy var snapshotSessions = SnapshotSessionManager(
+        onReading: { [weak self] tracker, reading in
+            self?.record(result: .success(reading), for: tracker)
+        },
+        onFailure: { [weak self] tracker, error in
+            self?.record(result: .failure(error), for: tracker)
+        }
+    )
 
     init(store: AppGroupStore) {
         self.store = store
@@ -19,18 +27,23 @@ final class BackgroundScheduler: ObservableObject {
 
     func sync() {
         let trackers = store.trackers
-        let trackerIDs = Set(trackers.map(\.id))
+        let textTrackers = trackers.filter { $0.renderMode == .text }
+        let trackerIDs = Set(textTrackers.map(\.id))
 
         for removedID in activeTrackerIDs.subtracting(trackerIDs) {
             schedulers[removedID]?.invalidate()
             schedulers[removedID] = nil
         }
 
-        for tracker in trackers {
+        for tracker in textTrackers {
             schedule(tracker)
         }
 
         activeTrackerIDs = trackerIDs
+        snapshotSessions.sync(
+            trackers: trackers,
+            concurrencyCap: store.preferences.snapshotConcurrencyCap
+        )
     }
 
     func triggerScrapeNow(trackerID: UUID) {
@@ -38,7 +51,14 @@ final class BackgroundScheduler: ObservableObject {
             return
         }
 
-        scrape(tracker)
+        if tracker.renderMode == .snapshot {
+            snapshotSessions.triggerSnapshotNow(
+                tracker: tracker,
+                concurrencyCap: store.preferences.snapshotConcurrencyCap
+            )
+        } else {
+            scrape(tracker)
+        }
     }
 
     private func schedule(_ tracker: Tracker) {
@@ -65,19 +85,23 @@ final class BackgroundScheduler: ObservableObject {
 
     private func scrape(_ tracker: Tracker, completion: (() -> Void)? = nil) {
         WKWebViewScraper.scrape(tracker: tracker) { result in
-            do {
-                switch result {
-                case .success(let reading):
-                    try AppGroupStore.record(reading: reading, for: tracker)
-                case .failure(let error):
-                    try AppGroupStore.recordFailure(message: error.localizedDescription, for: tracker)
-                }
-                WidgetCenter.shared.reloadTimelines(ofKind: "MacosStatsWidget")
-            } catch {
-                // The Preferences UI surfaces configuration persistence errors;
-                // scrape write failures are transient and retried by the scheduler.
-            }
+            self.record(result: result, for: tracker)
             completion?()
+        }
+    }
+
+    private func record(result: Result<TrackerReading, Error>, for tracker: Tracker) {
+        do {
+            switch result {
+            case .success(let reading):
+                try AppGroupStore.record(reading: reading, for: tracker)
+            case .failure(let error):
+                try AppGroupStore.recordFailure(message: error.localizedDescription, for: tracker)
+            }
+            WidgetCenter.shared.reloadTimelines(ofKind: "MacosStatsWidget")
+        } catch {
+            // The Preferences UI surfaces configuration persistence errors;
+            // scrape write failures are transient and retried by the scheduler.
         }
     }
 }
