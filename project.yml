@@ -137,6 +137,7 @@ targets:
       - path: MacosWidgetsStatsFromWebsite/Shared
     settings:
       base:
+        PRODUCT_NAME: macos-widgets-stats-from-website
         PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-widgets-stats-from-website.cli
         INFOPLIST_FILE: MacosWidgetsStatsFromWebsite/Apps/CLI/Info.plist
         CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/CLI/MacosWidgetsStatsFromWebsiteCLI.entitlements
