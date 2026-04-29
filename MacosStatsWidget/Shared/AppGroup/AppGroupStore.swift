@@ -137,6 +137,18 @@ final class AppGroupStore: ObservableObject {
         lastPersistenceError = nil
     }
 
+    static func hasExistingConfigurationFile() -> Bool {
+        let fileManager = FileManager.default
+        let candidateURLs: [URL?] = [
+            AppGroupPaths.canonicalTrackersURL(),
+            AppGroupPaths.canonicalApplicationSupportURL().appendingPathComponent("config.json", isDirectory: false),
+            AppGroupPaths.appGroupTrackersURL(),
+            AppGroupPaths.sharedContainerURL()?.appendingPathComponent("config.json", isDirectory: false)
+        ]
+
+        return candidateURLs.compactMap { $0 }.contains { fileManager.fileExists(atPath: $0.path) }
+    }
+
     static func loadReadings() -> TrackerReadingsFile {
         guard let url = AppGroupPaths.appGroupReadingsURL(),
               let data = try? Data(contentsOf: url) else {
