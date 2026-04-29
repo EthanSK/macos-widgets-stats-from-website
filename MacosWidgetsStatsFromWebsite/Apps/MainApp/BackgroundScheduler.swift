@@ -122,6 +122,6 @@ final class BackgroundScheduler: ObservableObject {
         }
 
         notifiedBrokenTrackerIDs.insert(tracker.id)
-        HealNotifier.shared.notifyBrokenTracker(tracker, failureCount: failureCount)
+        TrackerAttentionNotifier.shared.notifyBrokenTracker(tracker, failureCount: failureCount)
     }
 }

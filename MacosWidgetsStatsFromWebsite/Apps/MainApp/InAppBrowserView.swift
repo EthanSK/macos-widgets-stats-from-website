@@ -38,6 +38,21 @@ struct InAppBrowserView: View {
                     .padding(.horizontal, 10)
                     .padding(.bottom, 6)
             }
+            if let siteCompatibilityMessage = controller.siteCompatibilityMessage {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text(siteCompatibilityMessage)
+                    Spacer()
+                    Button("Open in Browser") {
+                        controller.openCurrentURLInDefaultBrowser()
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
+            }
             Divider()
             WebViewHost(webView: controller.webView)
         }
@@ -96,6 +111,14 @@ struct InAppBrowserView: View {
             }
             .help("Go")
 
+            Button {
+                controller.openCurrentURLInDefaultBrowser()
+            } label: {
+                Label("Open in Browser", systemImage: "safari")
+            }
+            .disabled(controller.currentURLForExternalOpen == nil)
+            .help("Open the current page in your default browser")
+
             if allowsElementIdentification {
                 Button {
                     if controller.isIdentifying {
@@ -116,7 +139,7 @@ struct InAppBrowserView: View {
     }
 }
 
-private final class InAppBrowserController: NSObject, ObservableObject, WKNavigationDelegate {
+private final class InAppBrowserController: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
     let webView: WKWebView
 
     @Published var urlText: String
@@ -125,7 +148,12 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     @Published var isLoading = false
     @Published var isIdentifying = false
     @Published var inlineError: String?
+    @Published var siteCompatibilityMessage: String?
     @Published var preview: ElementCapturePreview?
+
+    var currentURLForExternalOpen: URL? {
+        webView.url ?? URL(string: urlText)
+    }
 
     private let userContentController: WKUserContentController
     private let identifyCoordinator: IdentifyElementCoordinator
@@ -161,6 +189,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         )
 
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         installObservers()
 
         if let initialURL {
@@ -169,6 +198,8 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     }
 
     deinit {
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
         userContentController.removeScriptMessageHandler(forName: "elementPicked")
         userContentController.removeScriptMessageHandler(forName: "inspectError")
     }
@@ -211,7 +242,17 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     func load(_ url: URL) {
         inlineError = nil
         urlText = url.absoluteString
+        updateSiteCompatibilityMessage(for: url)
         webView.load(URLRequest(url: url))
+    }
+
+    func openCurrentURLInDefaultBrowser() {
+        guard let url = currentURLForExternalOpen else {
+            inlineError = "Load a page before opening it in your browser."
+            return
+        }
+
+        NSWorkspace.shared.open(url)
     }
 
     func startIdentifying() {
@@ -248,17 +289,129 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         isLoading = false
         if let url = webView.url {
             urlText = url.absoluteString
+            updateSiteCompatibilityMessage(for: url)
         }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         isLoading = false
-        inlineError = error.localizedDescription
+        inlineError = browserErrorMessage(error)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         isLoading = false
-        inlineError = error.localizedDescription
+        inlineError = browserErrorMessage(error)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        inlineError = "The web content process quit unexpectedly. Reloading the page…"
+        webView.reload()
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.allow)
+            return
+        }
+
+        if let scheme = url.scheme?.lowercased(), !["http", "https", "about", "data", "blob"].contains(scheme) {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+            return
+        }
+
+        if navigationAction.targetFrame == nil {
+            webView.load(navigationAction.request)
+            decisionHandler(.cancel)
+            return
+        }
+
+        updateSiteCompatibilityMessage(for: url)
+        decisionHandler(.allow)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        if navigationAction.targetFrame == nil {
+            webView.load(navigationAction.request)
+        }
+        return nil
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = frame.request.url?.host ?? "Website message"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+        completionHandler()
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = frame.request.url?.host ?? "Website confirmation"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        completionHandler(alert.runModal() == .alertFirstButtonReturn)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = frame.request.url?.host ?? "Website prompt"
+        alert.informativeText = prompt
+        let textField = NSTextField(string: defaultText ?? "")
+        textField.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+        alert.accessoryView = textField
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        completionHandler(alert.runModal() == .alertFirstButtonReturn ? textField.stringValue : nil)
+    }
+
+    private func updateSiteCompatibilityMessage(for url: URL) {
+        guard let host = url.host?.lowercased() else {
+            siteCompatibilityMessage = nil
+            return
+        }
+
+        if host == "claude.ai" || host.hasSuffix(".claude.ai") || host == "anthropic.com" || host.hasSuffix(".anthropic.com") {
+            siteCompatibilityMessage = "Claude/Anthropic sign-in may reject embedded browsers or require OAuth/passkey steps in your default browser. This browser keeps a persistent local profile; use Open in Browser if the provider refuses the embedded flow."
+        } else {
+            siteCompatibilityMessage = nil
+        }
+    }
+
+    private func browserErrorMessage(_ error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
+            return "Navigation was cancelled."
+        }
+
+        return "Page load failed: \(error.localizedDescription)"
     }
 
     private func installObservers() {

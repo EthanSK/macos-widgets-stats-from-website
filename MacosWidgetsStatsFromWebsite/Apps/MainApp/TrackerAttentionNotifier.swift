@@ -1,5 +1,5 @@
 //
-//  HealNotifier.swift
+//  TrackerAttentionNotifier.swift
 //  MacosWidgetsStatsFromWebsite
 //
 //  Native notifications for broken trackers.
@@ -8,8 +8,8 @@
 import Foundation
 import UserNotifications
 
-final class HealNotifier {
-    static let shared = HealNotifier()
+final class TrackerAttentionNotifier {
+    static let shared = TrackerAttentionNotifier()
 
     static let categoryIdentifier = "TRACKER_NEEDS_ATTENTION"
     static let reidentifyActionIdentifier = "REIDENTIFY_TRACKER"

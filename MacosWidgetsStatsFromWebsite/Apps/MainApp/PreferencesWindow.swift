@@ -32,8 +32,8 @@ struct PreferencesWindow: View {
                 WidgetConfigsView()
             case .browser:
                 SignInPrefsView()
-            case .selfHeal:
-                SelfHealPrefsView()
+            case .mcp:
+                MCPPrefsView()
             case .about:
                 AboutPrefsView()
             }
@@ -67,7 +67,7 @@ struct PreferencesWindow: View {
             openMCPIdentifyRequest(notification)
         }
         .sheet(item: $mcpIdentifyPresentation) { presentation in
-            InAppBrowserView(initialURL: presentation.url, renderMode: .text, allowsElementIdentification: true) { pick in
+            InAppBrowserView(initialURL: presentation.url, renderMode: presentation.renderMode, allowsElementIdentification: true) { pick in
                 completeMCPIdentifyRequest(presentation, pick: pick)
             }
             .frame(width: 1100, height: 760)
@@ -161,16 +161,17 @@ struct PreferencesWindow: View {
               let url = URL(string: urlString) else {
             return
         }
+        let renderMode = RenderMode(rawValue: notification.userInfo?["renderMode"] as? String ?? "") ?? .text
 
         NSApp.activate(ignoringOtherApps: true)
         store.reloadFromDisk()
 
         if !store.trackers.contains(where: { $0.id == trackerID }) {
-            store.addTracker(Tracker(id: trackerID, name: "Pending \(url.host ?? "Tracker")", url: url.absoluteString, selector: ""))
+            store.addTracker(Tracker(id: trackerID, name: "Pending \(url.host ?? "Tracker")", url: url.absoluteString, renderMode: renderMode, selector: ""))
         }
 
         selection = .browser
-        mcpIdentifyPresentation = MCPIdentifyPresentation(trackerID: trackerID, url: url)
+        mcpIdentifyPresentation = MCPIdentifyPresentation(trackerID: trackerID, url: url, renderMode: renderMode)
     }
 
     private func completeMCPIdentifyRequest(_ presentation: MCPIdentifyPresentation, pick: ElementPick) {
@@ -185,16 +186,10 @@ struct PreferencesWindow: View {
         }
         updated.selector = pick.selector
         updated.elementBoundingBox = pick.bbox
+        updated.renderMode = presentation.renderMode
         updated.url = presentation.url.absoluteString
         store.updateTracker(updated)
 
-        AuditLog.record(
-            trackerID: updated.id,
-            beforeSelector: nil,
-            afterSelector: pick.selector,
-            outcome: "human_in_loop_identified",
-            source: "mcp"
-        )
         NotificationCenter.default.post(name: .mcpConfigurationChanged, object: nil)
     }
 }
@@ -203,13 +198,14 @@ private struct MCPIdentifyPresentation: Identifiable {
     let id = UUID()
     let trackerID: UUID
     let url: URL
+    let renderMode: RenderMode
 }
 
 private enum PreferencesSection: String, CaseIterable, Hashable, Identifiable {
     case trackers
     case widgets
     case browser
-    case selfHeal
+    case mcp
     case about
 
     var id: String {
@@ -224,8 +220,8 @@ private enum PreferencesSection: String, CaseIterable, Hashable, Identifiable {
             return "Widgets"
         case .browser:
             return "Browser & Sign-in"
-        case .selfHeal:
-            return "Self-heal"
+        case .mcp:
+            return "MCP"
         case .about:
             return "About"
         }
@@ -239,8 +235,8 @@ private enum PreferencesSection: String, CaseIterable, Hashable, Identifiable {
             return "rectangle.grid.2x2"
         case .browser:
             return "globe"
-        case .selfHeal:
-            return "wrench.and.screwdriver"
+        case .mcp:
+            return "point.3.connected.trianglepath.dotted"
         case .about:
             return "info.circle"
         }

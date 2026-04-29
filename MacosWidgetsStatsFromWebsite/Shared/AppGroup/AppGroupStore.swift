@@ -339,7 +339,6 @@ final class AppGroupStore: ObservableObject {
         migrated["schemaVersion"] = currentSchemaVersion
         migrated.removeValue(forKey: "metrics")
         migrated.removeValue(forKey: "detectedCLIs")
-        migrated.removeValue(forKey: "selfHealCLIPriority")
         return migrated
     }
 
@@ -398,15 +397,8 @@ final class AppGroupStore: ObservableObject {
 
     private static func migratePreferencesObject(_ value: Any?) -> [String: Any] {
         var preferences = value as? [String: Any] ?? [:]
-        var selfHeal = preferences["selfHeal"] as? [String: Any] ?? [:]
         var notificationChannels = preferences["notificationChannels"] as? [String: Any] ?? [:]
 
-        if selfHeal["regexFallbackEnabled"] == nil {
-            selfHeal["regexFallbackEnabled"] = true
-        }
-        if selfHeal["externalAgentHealEnabled"] == nil {
-            selfHeal["externalAgentHealEnabled"] = true
-        }
         if notificationChannels["macosNative"] == nil {
             notificationChannels["macosNative"] = true
         }
@@ -417,10 +409,8 @@ final class AppGroupStore: ObservableObject {
             preferences["snapshotConcurrencyCap"] = AppPreferences().snapshotConcurrencyCap
         }
 
-        preferences["selfHeal"] = selfHeal
         preferences["notificationChannels"] = notificationChannels
         preferences.removeValue(forKey: "detectedCLIs")
-        preferences.removeValue(forKey: "selfHealCLIPriority")
         return preferences
     }
 
@@ -634,28 +624,15 @@ struct AppConfiguration: Codable {
 }
 
 struct AppPreferences: Codable, Equatable {
-    var selfHeal: SelfHealPreferences
     var notificationChannels: NotificationChannelPreferences
     var snapshotConcurrencyCap: Int
 
     init(
-        selfHeal: SelfHealPreferences = SelfHealPreferences(),
         notificationChannels: NotificationChannelPreferences = NotificationChannelPreferences(),
         snapshotConcurrencyCap: Int = 8
     ) {
-        self.selfHeal = selfHeal
         self.notificationChannels = notificationChannels
         self.snapshotConcurrencyCap = snapshotConcurrencyCap
-    }
-}
-
-struct SelfHealPreferences: Codable, Equatable {
-    var regexFallbackEnabled: Bool
-    var externalAgentHealEnabled: Bool
-
-    init(regexFallbackEnabled: Bool = true, externalAgentHealEnabled: Bool = true) {
-        self.regexFallbackEnabled = regexFallbackEnabled
-        self.externalAgentHealEnabled = externalAgentHealEnabled
     }
 }
 

@@ -90,16 +90,6 @@ struct TrackersListView: View {
         }
         .sheet(item: $editorPresentation) { presentation in
             TrackerEditorView(mode: presentation.mode, tracker: presentation.tracker) { savedTracker in
-                if let existing = store.trackers.first(where: { $0.id == savedTracker.id }),
-                   existing.selector != savedTracker.selector {
-                    AuditLog.record(
-                        trackerID: savedTracker.id,
-                        beforeSelector: existing.selector,
-                        afterSelector: savedTracker.selector,
-                        outcome: "user_reidentified",
-                        source: "main_app"
-                    )
-                }
                 store.upsertTracker(savedTracker)
                 selectedTrackerID = savedTracker.id
             }

@@ -12,14 +12,27 @@ enum AppGroupPaths {
     static let applicationSupportDirectoryName = "macOS Widgets Stats from Website"
     static let trackersFileName = "trackers.json"
     static let readingsFileName = "readings.json"
-    static let auditLogFileName = "audit-log.json"
     static let mcpSocketFileName = "mcp.sock"
+    private static let testContainerEnvironmentKey = "MACOS_WIDGETS_STATS_TEST_CONTAINER"
+
+    private static func testContainerURL() -> URL? {
+        guard let path = ProcessInfo.processInfo.environment[testContainerEnvironmentKey],
+              !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
 
     static func sharedContainerURL() -> URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
+        testContainerURL() ?? FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
     }
 
     static func canonicalApplicationSupportURL() -> URL {
+        if let testContainerURL = testContainerURL() {
+            return testContainerURL
+        }
+
         let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return baseURL.appendingPathComponent(applicationSupportDirectoryName, isDirectory: true)
     }
@@ -36,9 +49,6 @@ enum AppGroupPaths {
         sharedContainerURL()?.appendingPathComponent(readingsFileName, isDirectory: false)
     }
 
-    static func appGroupAuditLogURL() -> URL? {
-        sharedContainerURL()?.appendingPathComponent(auditLogFileName, isDirectory: false)
-    }
 
     static func mcpApplicationSupportURL() -> URL {
         if let sharedContainerURL = sharedContainerURL() {

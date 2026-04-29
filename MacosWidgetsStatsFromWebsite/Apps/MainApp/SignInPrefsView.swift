@@ -22,7 +22,11 @@ struct SignInPrefsView: View {
                     Text(WebViewProfile.name)
                         .monospaced()
                 }
-                Text("WKWebsiteDataStore profile name: \(WebViewProfile.name)")
+                LabeledContent("Persistent") {
+                    Text(WebViewProfile.shared.websiteDataStore.isPersistent ? "Yes" : "No")
+                        .foregroundColor(WebViewProfile.shared.websiteDataStore.isPersistent ? .secondary : .red)
+                }
+                Text("WKWebsiteDataStore profile name: \(WebViewProfile.name). Cookies, local storage, IndexedDB, service workers, and caches are shared by the visible browser and scraper sessions.")
                     .foregroundStyle(.secondary)
             }
 
@@ -30,6 +34,10 @@ struct SignInPrefsView: View {
                 HStack(spacing: 12) {
                     Button("Sign in to a site") {
                         browserPresentation = SignInBrowserPresentation(url: nil)
+                    }
+
+                    Button("Open Claude") {
+                        browserPresentation = SignInBrowserPresentation(url: URL(string: "https://claude.ai/login"))
                     }
 
                     Menu("Re-sign in to...") {

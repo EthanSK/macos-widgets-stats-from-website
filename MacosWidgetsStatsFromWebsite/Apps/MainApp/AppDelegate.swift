@@ -11,7 +11,7 @@ import UserNotifications
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
-        HealNotifier.shared.configure()
+        TrackerAttentionNotifier.shared.configure()
         UpdateController.shared.start()
         MCPServer.shared.startSocketServer()
     }

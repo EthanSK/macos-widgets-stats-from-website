@@ -7,6 +7,7 @@
 
 import Darwin
 import Foundation
+import WebKit
 
 extension Notification.Name {
     static let mcpIdentifyElementRequested = Notification.Name("MacosWidgetsStatsFromWebsite.MCP.identifyElementRequested")
@@ -154,6 +155,14 @@ private enum MCPTransport {
     case unixSocket
 }
 
+private struct MCPToolContext {
+    let transport: MCPTransport
+
+    var supportsInteractiveBrowser: Bool {
+        transport == .unixSocket
+    }
+}
+
 private final class MCPConnectionSession {
     private let input: FileHandle
     private let output: FileHandle
@@ -278,7 +287,7 @@ private final class MCPConnectionSession {
             }
             let arguments = params["arguments"] as? [String: Any] ?? [:]
             try rateLimit(toolName: name)
-            let toolResult = try MCPToolDispatcher.perform(name: name, arguments: arguments)
+            let toolResult = try MCPToolDispatcher.perform(name: name, arguments: arguments, context: MCPToolContext(transport: transport))
             return [
                 "content": [
                     [
@@ -293,7 +302,7 @@ private final class MCPConnectionSession {
                 throw MCPError.methodNotFound(method)
             }
             try rateLimit(toolName: method)
-            return try MCPToolDispatcher.perform(name: method, arguments: params)
+            return try MCPToolDispatcher.perform(name: method, arguments: params, context: MCPToolContext(transport: transport))
         }
     }
 
@@ -431,6 +440,7 @@ private enum MCPError: Error {
 private enum MCPToolCatalog {
     static let destructiveToolNames: Set<String> = [
         "delete_tracker",
+        "delete_widget_configuration",
         "update_widget_configuration",
         "import_selector_pack"
     ]
@@ -438,6 +448,7 @@ private enum MCPToolCatalog {
     static let toolNames = Set(tools.compactMap { $0["name"] as? String })
 
     static let tools: [[String: Any]] = [
+        tool("get_status", "Return MCP server status, browser-profile details, data counts, and the available tool names.", [:]),
         tool("list_trackers", "Return all trackers with current values, status, and last-updated metadata.", [:]),
         tool("get_tracker", "Return one tracker with current value, sparkline, and full configuration.", [
             "id": stringSchema("Tracker UUID")
@@ -447,36 +458,54 @@ private enum MCPToolCatalog {
             "url": stringSchema("HTTPS URL, or http://localhost for testing"),
             "renderMode": enumSchema(["text", "snapshot"]),
             "selector": stringSchema("CSS selector"),
+            "elementBoundingBox": boundingBoxSchema(),
             "label": stringSchema("Optional widget label"),
             "icon": stringSchema("SF Symbol name"),
+            "accentColorHex": stringSchema("Hex accent color, e.g. #10a37f"),
             "refreshIntervalSec": intSchema("Refresh interval in seconds"),
             "hideElements": arraySchema(stringSchema("CSS selector to hide before snapshots"))
         ], required: ["name", "url", "selector"]),
-        tool("update_tracker", "Modify tracker fields such as name, URL, label, icon, refresh interval, mode, or selector.", [
-            "id": stringSchema("Tracker UUID")
+        tool("update_tracker", "Modify tracker fields such as name, URL, label, icon, refresh interval, mode, selector, element bounds, or hidden snapshot selectors.", [
+            "id": stringSchema("Tracker UUID"),
+            "name": stringSchema("Tracker name"),
+            "url": stringSchema("HTTPS URL, or http://localhost for testing"),
+            "renderMode": enumSchema(["text", "snapshot"]),
+            "selector": stringSchema("CSS selector"),
+            "elementBoundingBox": boundingBoxSchema(),
+            "label": stringSchema("Optional widget label"),
+            "icon": stringSchema("SF Symbol name"),
+            "accentColorHex": stringSchema("Hex accent color, e.g. #10a37f"),
+            "refreshIntervalSec": intSchema("Refresh interval in seconds"),
+            "hideElements": arraySchema(stringSchema("CSS selector to hide before snapshots"))
         ], required: ["id"]),
         tool("delete_tracker", "Delete a tracker and unlink it from widget configurations.", [
             "id": stringSchema("Tracker UUID")
         ], required: ["id"]),
-        tool("update_selector", "Apply a self-heal selector replacement from an external MCP agent.", [
-            "id": stringSchema("Tracker UUID"),
-            "newSelector": stringSchema("Replacement CSS selector")
-        ], required: ["id", "newSelector"]),
         tool("trigger_scrape", "Force-refresh one tracker now and return the resulting reading.", [
             "id": stringSchema("Tracker UUID")
         ], required: ["id"]),
-        tool("identify_element", "Open the visible app browser and wait for the user to confirm an element.", [
-            "url": stringSchema("HTTPS URL, or http://localhost for testing")
-        ], required: ["url"]),
+        tool("identify_element", "Open the running app's visible browser and wait for the user to confirm an element. Requires the app socket transport; stdio-only clients cannot show UI.", [
+            "trackerId": stringSchema("Existing tracker UUID to update after the user picks an element. Omit to create a pending tracker."),
+            "url": stringSchema("HTTPS URL, or http://localhost for testing. Required when trackerId is omitted."),
+            "renderMode": enumSchema(["text", "snapshot"])
+        ]),
         tool("list_widget_configurations", "Return all widget compositions.", [:]),
+        tool("get_widget_configuration", "Return one widget composition.", [
+            "id": stringSchema("Widget configuration UUID")
+        ], required: ["id"]),
         tool("update_widget_configuration", "Create or update a widget composition.", [
             "id": stringSchema("Widget configuration UUID; optional for create"),
             "name": stringSchema("Configuration name"),
             "templateID": enumSchema(WidgetTemplate.allCases.map(\.rawValue)),
             "size": enumSchema(WidgetConfigurationSize.allCases.map(\.rawValue)),
             "layout": enumSchema(WidgetConfigurationLayout.allCases.map(\.rawValue)),
-            "trackerIDs": arraySchema(stringSchema("Tracker UUID"))
+            "trackerIDs": arraySchema(stringSchema("Tracker UUID")),
+            "showSparklines": boolSchema("Whether to show sparkline charts where the template supports them"),
+            "showLabels": boolSchema("Whether to show tracker labels")
         ]),
+        tool("delete_widget_configuration", "Delete a widget composition.", [
+            "id": stringSchema("Widget configuration UUID")
+        ], required: ["id"]),
         tool("export_selector_pack", "Serialize one tracker as selector pack JSON.", [
             "trackerId": stringSchema("Tracker UUID")
         ], required: ["trackerId"]),
@@ -494,10 +523,7 @@ private enum MCPToolCatalog {
                 "type": ["string", "null"],
                 "description": "Webhook URL, or null to clear."
             ]
-        ]),
-        tool("get_heal_history", "Return selector replacement and fallback audit history for a tracker.", [
-            "id": stringSchema("Tracker UUID")
-        ], required: ["id"])
+        ])
     ]
 
     private static func tool(
@@ -526,6 +552,14 @@ private enum MCPToolCatalog {
         ["type": "integer", "description": description]
     }
 
+    private static func numberSchema(_ description: String) -> [String: Any] {
+        ["type": "number", "description": description]
+    }
+
+    private static func boolSchema(_ description: String) -> [String: Any] {
+        ["type": "boolean", "description": description]
+    }
+
     private static func enumSchema(_ values: [String]) -> [String: Any] {
         ["type": "string", "enum": values]
     }
@@ -533,13 +567,32 @@ private enum MCPToolCatalog {
     private static func arraySchema(_ itemSchema: [String: Any]) -> [String: Any] {
         ["type": "array", "items": itemSchema]
     }
+
+    private static func boundingBoxSchema() -> [String: Any] {
+        [
+            "type": "object",
+            "description": "Element bounding box captured by Identify Element",
+            "properties": [
+                "x": numberSchema("X coordinate in CSS pixels"),
+                "y": numberSchema("Y coordinate in CSS pixels"),
+                "width": numberSchema("Width in CSS pixels"),
+                "height": numberSchema("Height in CSS pixels"),
+                "viewportWidth": numberSchema("Viewport width in CSS pixels"),
+                "viewportHeight": numberSchema("Viewport height in CSS pixels"),
+                "devicePixelRatio": numberSchema("Device pixel ratio")
+            ],
+            "additionalProperties": false
+        ]
+    }
 }
 
 private enum MCPToolDispatcher {
-    static func perform(name: String, arguments: [String: Any]) throws -> Any {
+    static func perform(name: String, arguments: [String: Any], context: MCPToolContext) throws -> Any {
         MCPInvocationLogger.logTool(name, arguments: arguments)
 
         switch name {
+        case "get_status":
+            return getStatus(context: context)
         case "list_trackers":
             return listTrackers()
         case "get_tracker":
@@ -550,27 +603,49 @@ private enum MCPToolDispatcher {
             return try updateTracker(arguments)
         case "delete_tracker":
             return try deleteTracker(arguments)
-        case "update_selector":
-            return try updateSelector(arguments)
         case "trigger_scrape":
             return try triggerScrape(arguments)
         case "identify_element":
-            return try identifyElement(arguments)
+            return try identifyElement(arguments, context: context)
         case "list_widget_configurations":
             return listWidgetConfigurations()
+        case "get_widget_configuration":
+            return try getWidgetConfiguration(arguments)
         case "update_widget_configuration":
             return try updateWidgetConfiguration(arguments)
+        case "delete_widget_configuration":
+            return try deleteWidgetConfiguration(arguments)
         case "export_selector_pack":
             return try exportSelectorPack(arguments)
         case "import_selector_pack":
             return try importSelectorPack(arguments)
         case "attach_webhook":
             return try attachWebhook(arguments)
-        case "get_heal_history":
-            return try getHealHistory(arguments)
         default:
             throw MCPError.toolNotFound(name)
         }
+    }
+
+    private static func getStatus(context: MCPToolContext) -> Any {
+        let configuration = AppGroupStore.loadSharedConfiguration()
+        return [
+            "serverInfo": [
+                "name": "macos-widgets-stats-from-website",
+                "version": "0.12.2"
+            ],
+            "transport": context.transport == .unixSocket ? "unixSocket" : "stdio",
+            "interactiveElementIdentification": context.supportsInteractiveBrowser ? "available" : "requires_app_socket",
+            "socketPath": AppGroupPaths.mcpSocketURL().path,
+            "browserProfile": [
+                "name": WebViewProfile.name,
+                "persistent": WebViewProfile.shared.websiteDataStore.isPersistent
+            ],
+            "counts": [
+                "trackers": configuration.trackers.count,
+                "widgetConfigurations": configuration.widgetConfigurations.count
+            ],
+            "tools": Array(MCPToolCatalog.toolNames).sorted()
+        ]
     }
 
     private static func listTrackers() -> Any {
@@ -604,9 +679,11 @@ private enum MCPToolDispatcher {
             url: url.absoluteString,
             renderMode: renderMode,
             selector: selector,
+            elementBoundingBox: try boundingBoxArgument("elementBoundingBox", arguments),
             refreshIntervalSec: intArgument("refreshIntervalSec", arguments),
             label: arguments["label"] as? String,
             icon: (arguments["icon"] as? String)?.nilIfEmpty ?? Tracker.defaultIcon,
+            accentColorHex: (arguments["accentColorHex"] as? String)?.nilIfEmpty ?? Tracker.defaultAccentColorHex,
             hideElements: stringArrayArgument("hideElements", arguments) ?? []
         )
 
@@ -651,6 +728,9 @@ private enum MCPToolDispatcher {
             if let value = arguments["selector"] as? String {
                 tracker.selector = value.trimmingCharacters(in: .whitespacesAndNewlines)
             }
+            if arguments.keys.contains("elementBoundingBox") {
+                tracker.elementBoundingBox = try boundingBoxArgument("elementBoundingBox", arguments)
+            }
             if let hideElements = stringArrayArgument("hideElements", arguments) {
                 tracker.hideElements = hideElements
             }
@@ -682,44 +762,6 @@ private enum MCPToolDispatcher {
         return ["ok": true]
     }
 
-    private static func updateSelector(_ arguments: [String: Any]) throws -> Any {
-        let id = try uuidArgument("id", arguments)
-        let selector = try stringArgument("newSelector", arguments).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !selector.isEmpty else {
-            throw MCPError.validation("newSelector cannot be empty.")
-        }
-
-        let configuration = AppGroupStore.loadSharedConfiguration()
-        guard configuration.preferences.selfHeal.externalAgentHealEnabled else {
-            throw MCPError.validation("External agent selector updates are disabled in Preferences.")
-        }
-
-        var updatedTracker: Tracker?
-        var beforeSelector: String?
-        try AppGroupStore.mutateSharedConfiguration { configuration in
-            guard let index = configuration.trackers.firstIndex(where: { $0.id == id }) else {
-                throw MCPError.notFound("Tracker \(id.uuidString) was not found.")
-            }
-            var tracker = configuration.trackers[index]
-            beforeSelector = tracker.selector
-            tracker.selectorHistory.append(SelectorHistoryEntry(selector: tracker.selector))
-            tracker.selector = selector
-            tracker.lastHealedAt = Date()
-            configuration.trackers[index] = tracker
-            updatedTracker = tracker
-        }
-
-        AuditLog.record(
-            trackerID: id,
-            beforeSelector: beforeSelector,
-            afterSelector: selector,
-            outcome: "mcp_selector_updated",
-            source: "mcp"
-        )
-        notifyConfigurationChanged()
-        return trackerPayload(try require(updatedTracker, "Updated tracker was not produced."), includeHistory: true)
-    }
-
     private static func triggerScrape(_ arguments: [String: Any]) throws -> Any {
         let id = try uuidArgument("id", arguments)
         let configuration = AppGroupStore.loadSharedConfiguration()
@@ -740,39 +782,78 @@ private enum MCPToolDispatcher {
         return readingPayload(reading, includeHistory: true)
     }
 
-    private static func identifyElement(_ arguments: [String: Any]) throws -> Any {
-        let url = try urlArgument("url", arguments)
-        let tracker = Tracker(
-            name: "Pending \(url.host ?? "Tracker")",
-            url: url.absoluteString,
-            renderMode: .text,
-            selector: ""
-        )
-
-        try AppGroupStore.mutateSharedConfiguration { configuration in
-            configuration.trackers.append(tracker)
+    private static func identifyElement(_ arguments: [String: Any], context: MCPToolContext) throws -> Any {
+        guard context.supportsInteractiveBrowser else {
+            throw MCPError.validation("identify_element requires the running app socket MCP server so the visible browser can open. Connect to the app's mcp.sock, or use update_tracker with a known selector.")
         }
 
-        notifyConfigurationChanged()
+        let existingTrackerID = try optionalUUIDArgument("trackerId", arguments)
+        let configuration = AppGroupStore.loadSharedConfiguration()
+        let existingTracker = existingTrackerID.flatMap { id in
+            configuration.trackers.first { $0.id == id }
+        }
+        if let existingTrackerID, existingTracker == nil {
+            throw MCPError.notFound("Tracker \(existingTrackerID.uuidString) was not found.")
+        }
+
+        let url: URL
+        if arguments.keys.contains("url") {
+            url = try urlArgument("url", arguments)
+        } else if let existingTracker {
+            url = try validatedURL(from: existingTracker.url)
+        } else {
+            throw MCPError.invalidParams("url is required when trackerId is omitted.")
+        }
+
+        let renderMode = renderModeArgument(arguments["renderMode"]) ?? existingTracker?.renderMode ?? .text
+        let trackerID: UUID
+        if let existingTracker {
+            trackerID = existingTracker.id
+        } else {
+            let tracker = Tracker(
+                name: "Pending \(url.host ?? "Tracker")",
+                url: url.absoluteString,
+                renderMode: renderMode,
+                selector: ""
+            )
+            trackerID = tracker.id
+            try AppGroupStore.mutateSharedConfiguration { configuration in
+                configuration.trackers.append(tracker)
+            }
+            notifyConfigurationChanged()
+        }
+
         DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: .mcpIdentifyElementRequested,
                 object: nil,
                 userInfo: [
-                    "trackerID": tracker.id.uuidString,
-                    "url": url.absoluteString
+                    "trackerID": trackerID.uuidString,
+                    "url": url.absoluteString,
+                    "renderMode": renderMode.rawValue
                 ]
             )
         }
 
         return [
-            "trackerId": tracker.id.uuidString,
-            "status": "awaiting_user"
+            "trackerId": trackerID.uuidString,
+            "status": "awaiting_user",
+            "url": url.absoluteString,
+            "renderMode": renderMode.rawValue
         ]
     }
 
     private static func listWidgetConfigurations() -> Any {
         AppGroupStore.loadSharedConfiguration().widgetConfigurations.map(widgetConfigurationPayload)
+    }
+
+    private static func getWidgetConfiguration(_ arguments: [String: Any]) throws -> Any {
+        let id = try uuidArgument("id", arguments)
+        let configuration = AppGroupStore.loadSharedConfiguration()
+        guard let widgetConfiguration = configuration.widgetConfigurations.first(where: { $0.id == id }) else {
+            throw MCPError.notFound("Widget configuration \(id.uuidString) was not found.")
+        }
+        return widgetConfigurationPayload(widgetConfiguration)
     }
 
     private static func updateWidgetConfiguration(_ arguments: [String: Any]) throws -> Any {
@@ -858,6 +939,20 @@ private enum MCPToolDispatcher {
         return widgetConfigurationPayload(try require(updatedConfiguration, "Updated widget configuration was not produced."))
     }
 
+    private static func deleteWidgetConfiguration(_ arguments: [String: Any]) throws -> Any {
+        let id = try uuidArgument("id", arguments)
+
+        try AppGroupStore.mutateSharedConfiguration { configuration in
+            guard configuration.widgetConfigurations.contains(where: { $0.id == id }) else {
+                throw MCPError.notFound("Widget configuration \(id.uuidString) was not found.")
+            }
+            configuration.widgetConfigurations.removeAll { $0.id == id }
+        }
+
+        notifyConfigurationChanged()
+        return ["ok": true]
+    }
+
     private static func exportSelectorPack(_ arguments: [String: Any]) throws -> Any {
         let id = try uuidArgument("trackerId", arguments)
         let configuration = AppGroupStore.loadSharedConfiguration()
@@ -889,21 +984,6 @@ private enum MCPToolDispatcher {
         }
         notifyConfigurationChanged()
         return ["ok": true]
-    }
-
-    private static func getHealHistory(_ arguments: [String: Any]) throws -> Any {
-        let id = try uuidArgument("id", arguments)
-        return AuditLog.entries(for: id).map { entry in
-            [
-                "id": entry.id.uuidString,
-                "timestamp": ISO8601DateFormatter().string(from: entry.timestamp),
-                "trackerID": entry.trackerID.uuidString,
-                "beforeSelector": entry.beforeSelector as Any? ?? NSNull(),
-                "afterSelector": entry.afterSelector as Any? ?? NSNull(),
-                "outcome": entry.outcome,
-                "source": entry.source
-            ]
-        }
     }
 
     private static func blockingScrape(_ tracker: Tracker) -> Result<TrackerReading, Error> {
@@ -938,13 +1018,6 @@ private enum MCPToolDispatcher {
             "icon": tracker.icon,
             "accentColorHex": tracker.accentColorHex,
             "hideElements": tracker.hideElements,
-            "lastHealedAt": tracker.lastHealedAt.map { ISO8601DateFormatter().string(from: $0) } as Any? ?? NSNull(),
-            "selectorHistory": tracker.selectorHistory.map { entry in
-                [
-                    "selector": entry.selector,
-                    "replacedAt": ISO8601DateFormatter().string(from: entry.replacedAt)
-                ]
-            },
             "reading": AppGroupStore.reading(for: tracker.id).map { readingPayload($0, includeHistory: includeHistory) } as Any? ?? NSNull()
         ]
 
@@ -1049,6 +1122,16 @@ private enum MCPToolDispatcher {
         return id
     }
 
+    private static func optionalUUIDArgument(_ key: String, _ arguments: [String: Any]) throws -> UUID? {
+        guard arguments.keys.contains(key) else {
+            return nil
+        }
+        guard let value = arguments[key] as? String, let id = UUID(uuidString: value) else {
+            throw MCPError.invalidParams("Invalid UUID argument: \(key).")
+        }
+        return id
+    }
+
     private static func uuidArrayArgument(_ key: String, _ arguments: [String: Any]) throws -> [UUID]? {
         guard arguments.keys.contains(key) else {
             return nil
@@ -1071,6 +1154,38 @@ private enum MCPToolDispatcher {
         }
 
         return ids
+    }
+
+    private static func boundingBoxArgument(_ key: String, _ arguments: [String: Any]) throws -> ElementBoundingBox? {
+        guard arguments.keys.contains(key) else {
+            return nil
+        }
+        if arguments[key] is NSNull {
+            return nil
+        }
+        guard let object = arguments[key] as? [String: Any] else {
+            throw MCPError.invalidParams("\(key) must be an object or null.")
+        }
+
+        guard let x = doubleValue(object["x"]),
+              let y = doubleValue(object["y"]),
+              let width = doubleValue(object["width"]),
+              let height = doubleValue(object["height"]),
+              let viewportWidth = doubleValue(object["viewportWidth"]),
+              let viewportHeight = doubleValue(object["viewportHeight"]),
+              let devicePixelRatio = doubleValue(object["devicePixelRatio"]) else {
+            throw MCPError.invalidParams("\(key) must include numeric x, y, width, height, viewportWidth, viewportHeight, and devicePixelRatio.")
+        }
+
+        return ElementBoundingBox(
+            x: x,
+            y: y,
+            width: width,
+            height: height,
+            viewportWidth: viewportWidth,
+            viewportHeight: viewportHeight,
+            devicePixelRatio: devicePixelRatio
+        )
     }
 
     private static func intArgument(_ key: String, _ arguments: [String: Any]) -> Int? {

@@ -39,6 +39,10 @@ final class WebViewProfile {
     func makeConfiguration(userContentController: WKUserContentController = WKUserContentController()) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = websiteDataStore
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+        if #available(macOS 11.0, *) {
+            configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        }
         // Keep one shared process pool for the visible browser and future
         // headless scrapers. The typed API is deprecated on modern macOS, but
         // the Obj-C property remains available and is harmless where no-op.

@@ -36,8 +36,8 @@ A widget on the desktop is the right surface for this:
 The product is therefore: **a macOS WidgetKit widget app that displays
 scraped content from any logged-in web page** — text values *or* live element
 snapshots — **configured once via a click-to-pick element flow, refreshing on
-a per-tracker schedule, with self-healing fallbacks when sites change their
-layout**.
+a per-tracker schedule, with clear stale/broken status and a re-identify flow
+when sites change their layout**.
 
 LLM-spend pages are the canonical example use case. The product itself is
 **not coupled** to LLM spend, money, or AI usage: any text node, number,
@@ -108,9 +108,9 @@ it. There is one source of truth.
   acceptance.
 - The main app has the network-client entitlement (in-app browser, headless
   scraping, webhook POSTs, MCP socket) but **never spawns external CLIs**.
-  Self-heal that requires `codex exec` or `claude -p` runs **out of process**
-  through the MCP server: the user's own Codex / Claude Code session calls
-  `update_selector` on us. The app never invokes any AI binary itself.
+  AI involvement, if any, happens outside the app: the user's own Codex /
+  Claude Code session connects to MCP and calls ordinary tracker/config tools.
+  The app never invokes any AI binary itself.
 - The main app's *scheduled scraping* runs through
   `NSBackgroundActivityScheduler` — sandbox-safe, the canonical Apple-blessed
   surface for "rerun this every N minutes while the app is alive (or wake
@@ -186,7 +186,7 @@ MacosWidgetsStatsFromWebsite/
       InspectOverlayJS.swift          — JS string for hover/click overlay
       OnboardingView.swift            — first-launch flow (sign-in → identify → widget)
       SignInPrefsView.swift           — Sign in / Re-sign in / Reset Browser
-      SelfHealPrefsView.swift         — regex fallback toggle, MCP audit log
+      MCPPrefsView.swift              — socket path, token reveal/copy, MCP notes
       SelectorPackImportView.swift    — drag-drop / open-with handler
       BackgroundScheduler.swift       — NSBackgroundActivityScheduler wrapper
     WidgetExtension/
@@ -222,18 +222,17 @@ MacosWidgetsStatsFromWebsite/
         AddTrackerTool.swift
         UpdateTrackerTool.swift
         DeleteTrackerTool.swift
-        UpdateSelectorTool.swift
         TriggerScrapeTool.swift
         IdentifyElementTool.swift
         ListWidgetConfigsTool.swift
+        GetWidgetConfigTool.swift
         UpdateWidgetConfigTool.swift
+        DeleteWidgetConfigTool.swift
         ExportSelectorPackTool.swift
         ImportSelectorPackTool.swift
         AttachWebhookTool.swift
-        GetHealHistoryTool.swift
       Auth/
         SocketAuth.swift              — UNIX-perm + Keychain shared-secret check
-        AuditLog.swift                — append-only log of every tool call
   Shared/
     Models/
       Tracker.swift                   — Tracker struct (config row)
@@ -253,17 +252,13 @@ MacosWidgetsStatsFromWebsite/
       ProfileManager.swift            — WKWebsiteDataStore identifier mgmt
       SelectorRunner.swift            — runs a CSS selector, returns innerText
       ElementSnapshotter.swift        — element bbox -> PNG via takeSnapshot(of:rect)
-    SelectorHeal/
-      RegexFallback.swift             — final-fallback numeric/$/% extractor
-      HealValidator.swift             — sanity-check a proposed selector (used by MCP)
-      HealNotifier.swift              — macOS native notification + webhook POST
     Notifications/
+      TrackerAttentionNotifier.swift  — macOS native notification when a tracker breaks
       UNUserNotificationCenterClient.swift — macOS native notifications
       WebhookClient.swift             — generic webhook POST (Slack/Discord/etc.)
   Tests/
     SharedTests/                      — unit tests for pure types
     ScrapingTests/                    — fixture-HTML based selector tests
-    HealTests/                        — regex fallback tests
     MCPServerTests/                   — JSON-RPC tool dispatch tests
   scripts/
     bootstrap.sh                      — one-shot dev setup
@@ -312,9 +307,7 @@ widget reads, written atomically by the main app):
       "hideElements": [                    // snapshot mode: CSS selectors hidden before capture
         ".cookie-banner",
         "#trial-prompt"
-      ],
-      "lastHealedAt": null,
-      "selectorHistory": []               // {selector, replacedAt} entries
+      ]
     }
   ],
   "widgetConfigurations": [
@@ -345,10 +338,6 @@ widget reads, written atomically by the main app):
     }
   ],
   "preferences": {
-    "selfHeal": {
-      "regexFallbackEnabled": true,           // bundled regex extractor; no AI calls in-app
-      "externalAgentHealEnabled": true        // allow MCP `update_selector` from agents
-    },
     "notificationChannels": {
       "macosNative": true,
       "webhook": null                         // optional URL string
@@ -391,9 +380,8 @@ Readings live in a separate file (App Group only, never in user docs):
   `elementBoundingBox`.
 - `schemaVersion = 4` (this plan, v0.0.4): add `templateID` to each
   widget configuration; add `snapshotConcurrencyCap` to preferences; remove
-  any `detectedCLIs` / `selfHealCLIPriority` fields written by earlier dev
-  builds (those features were dropped — the app no longer detects or invokes
-  AI CLIs).
+  earlier dev-build AI-CLI preference fields (those features were dropped —
+  the app no longer detects or invokes AI CLIs).
 
 On app launch we read both files, compare against `currentSchemaVersion`,
 and run forward migrators (`Migrator_1_to_2`, `Migrator_2_to_3`,
@@ -566,17 +554,14 @@ slower than the polling interval. Instead:
   `WKWebsiteDataStore(forIdentifier:)`. Where the site offers passkeys we
   use `ASWebAuthenticationSession`.
 
-## 8. Self-heal flow
+## 8. Tracker failure and re-identify flow
 
-When a site changes layout, the cached selector breaks. The app heals via
-three independent paths, in priority order:
+When a site changes layout, the cached selector can stop matching. The app does
+not try to auto-repair selectors or guess replacement values. It records the
+failure, keeps the previous successful reading where available, and gives the
+user a direct path back to Identify Element.
 
-1. **User-driven** (always available, the canonical path).
-2. **Bundled regex fallback** (always available, no AI required).
-3. **External AI agent via MCP** (opt-in, requires an external Codex / Claude
-   Code / other MCP-speaking agent connected to our MCP server).
-
-**Trigger conditions** (any one fires the heal pipeline):
+**Trigger conditions:**
 
 - Selector returns `null` / empty.
 - Selector matches but text doesn't parse per the tracker's `valueParser`
@@ -584,72 +569,21 @@ three independent paths, in priority order:
 - Snapshot mode: the cached element node has disappeared from the DOM, or
   the captured rect resolves to 0×0.
 
-### 8.1 User-driven self-heal
+**Failure handling:**
 
-Default and always-on. Pipeline:
+1. Each failed scrape writes `status = .stale`, `lastError`, and an incremented
+   `consecutiveFailureCount` to `readings.json`.
+2. Three consecutive failures mark the tracker `.broken`.
+3. The widget renders the broken state clearly instead of inventing a value.
+4. The app sends a macOS native notification: "<tracker> needs attention.
+   Open the app to re-identify the element."
+5. The notification/deep link opens the tracker in the normal Identify Element
+   flow. Saving writes the new selector and bounding box like any other edit.
 
-1. **Notify.** macOS native notification (UNUserNotificationCenter):
-   "Codex weekly spend selector is broken. Open app to re-identify."
-   The notification has a "Re-identify Element" action.
-2. **Open app.** Tapping the action deep-links into the in-app browser at
-   the tracker's URL with the InspectOverlay pre-armed.
-3. **User re-runs Identify Element.** Same flow as §6. Saves a new selector;
-   pushes the old one onto `selectorHistory`.
-
-### 8.2 Bundled regex fallback (no AI)
-
-Optional, in-app, fully offline. Until the user heals manually, the app
-keeps showing *something* by extracting the most-likely-matching token from
-the page HTML:
-
-- numeric tokens (`/-?\d+(?:[.,]\d+)*/`)
-- currency tokens (`/[$£€¥]\s?-?\d+(?:[.,]\d+)*/`)
-- percentage tokens (`/-?\d+(?:[.,]\d+)*\s?%/`)
-
-…filtered to those nearest the prior selector's last-known text in the DOM
-(by simple ancestor-distance heuristic). The widget renders this with a
-"stale" badge until the user re-identifies. Pure-Swift regex; no CLI, no
-network, no AI. Toggleable in Preferences.
-
-### 8.3 External AI agent via MCP
-
-Power-user path. The user's own Codex CLI / Claude Code CLI / other MCP
-client — running in *their* shell, not spawned by us — receives heal
-prompts and can call the MCP tool `update_selector(id, newSelector)` to
-commit a fix. This requires:
-
-- The user's agent has connected to our MCP server (see §13).
-- The user has not disabled `preferences.selfHeal.externalAgentHealEnabled`.
-
-The heal request is exposed via two channels: the user can ask their agent
-("hey Claude, my Codex spend tracker is broken, can you fix it?"), or the
-agent can subscribe to heal-event notifications via a future MCP resource
-(post-v1).
-
-**Critically, the app never spawns `codex` / `claude` / any AI binary
-itself.** All AI involvement is initiated by the user *in their own agent
-session* and arrives at the app through the MCP server. This keeps the App
-Store path clean (no external-process spawning from a sandboxed app) and
-keeps responsibility for "what does my agent do" with the user.
-
-### 8.4 Validation, commit, fail-safe
-
-When a new selector arrives — by user pick, regex-fallback promotion, or
-MCP `update_selector` — the same `HealValidator` runs:
-
-- exactly one element matches,
-- extracted text parses per `valueParser` (text mode),
-- the magnitude is within ~2 orders of the last good value,
-- or for snapshot mode, the bounding rect is non-zero.
-
-Pass → write the new selector, push the old one onto `selectorHistory`,
-set `lastHealedAt`, render normally. Fail → reject, surface the error to
-whoever submitted (UI toast for user; MCP error response for agent).
-
-Three consecutive failures on the same tracker mark `status = .broken` in
-`readings.json`. The widget renders a red label + "?" SF Symbol.
-Auto-heal stops on that tracker until the user opens the app and re-runs
-Identify Element.
+External agents use the same MCP surface as every other automation: call
+`get_tracker`/`list_trackers` to inspect status, `update_tracker` if they know
+a valid replacement selector, or `identify_element` over the running app socket
+to ask the user to pick a new element in the visible browser.
 
 **Notification payload.** macOS native notification by default, plus an
 optional generic webhook (POST `{title, body, severity, trackerId}` to any
@@ -906,19 +840,17 @@ The widget extension's entitlements are a **subset**: only `app-sandbox` and
 5. *No CLI in the App Store build.* The optional CLI is a **separate
    target** excluded from the App Store archive. Homebrew tap publishes
    the CLI artefact (separate repo: `homebrew-macos-widgets-stats-from-website`).
-6. *No external-process spawning from the sandboxed app.* Self-heal does
-   not invoke `codex` / `claude` / any binary; AI involvement only happens
-   via the MCP server, initiated by the user's own agent session
-   out-of-process. (This was an earlier risk; the v0.0.4 design eliminates
-   it entirely.)
+6. *No external-process spawning from the sandboxed app.* The app does not
+   invoke `codex` / `claude` / any binary; AI involvement only happens via
+   the MCP server, initiated by the user's own agent session out-of-process.
+   (This was an earlier risk; the v0.0.4 design eliminates it entirely.)
 
 The App Store submission is the *app + widget extension only* and is
 **fully functional standalone**: it scrapes via
-`NSBackgroundActivityScheduler`, falls back via the bundled regex
-extractor, exposes its MCP server, and ships the 12-template catalog. The
-optional Homebrew CLI is a power-user adjunct (custom schedules, headless
-server use, scriptable bulk ops). Users who never install the CLI get a
-complete product.
+`NSBackgroundActivityScheduler`, exposes its MCP server, and ships the
+12-template catalog. The optional Homebrew CLI is a power-user adjunct
+(custom schedules, headless server use, scriptable bulk ops). Users who never
+install the CLI get a complete product.
 
 ## 11. Phased rollout
 
@@ -932,8 +864,8 @@ complete product.
 | **v0.5** | Widget reads from App Group; Text mode renders with sparkline; configurable per-instance via Intent. First few of the 12 templates implemented. |
 | **v0.6** | Snapshot mode rendering on all sizes. Long-lived session pattern, 2 s polling, `takeSnapshot(of:rect)`. Cropper validated against fixture pages. |
 | **v0.7** | Widget configurations editor + the full 12-template catalog. Layouts: grid / stack / single. Built-in template gallery in Preferences. |
-| **v0.8** | Self-heal: user-driven re-identify path + bundled regex fallback + `update_selector` accepted from MCP. macOS native notification + generic webhook. |
-| **v0.9** | Embedded MCP server (§13). Full tool set + auth + transport selection. Audit log. |
+| **v0.8** | Broken-tracker status + user-driven re-identify path. macOS native notification + generic webhook. |
+| **v0.9** | Embedded MCP server (§13). Full tool set + auth + transport selection. Local diagnostic logging. |
 | **v0.10** | Selector packs: JSON export / import, Open-With + drag-drop into the main app. |
 | **v0.11** | First-launch flow (§14): sign-in → Identify Element → first widget. **No CLI detection step.** |
 | **v0.12** | Polish: error states, fail-safe, `.broken` status, re-Identify flow refinements, Homebrew CLI installer + LaunchAgent. |
@@ -974,18 +906,18 @@ widgets are both first-class.
 port), the budget is per widget instance, not per tracker. On macOS it's a
 non-issue.
 
-### 12.3 Self-heal strategy
-*Question:* Codex first, Claude first, or user choice?
-*Resolution:* The app itself never invokes any AI CLI. Three independent heal
-paths: (a) **user-driven** re-Identify Element (always default), (b)
-**bundled regex fallback** in pure Swift (no AI, no network), (c) **external
-AI agent via MCP** — the user's own Codex / Claude Code session calls
-`update_selector` on our MCP server. No internal CLI invocation, no spawn,
-no priority chain.
-*Reason:* Spawning external binaries from a sandboxed app is brittle, an App
-Store risk, and conflates responsibility. Pushing AI involvement out to the
-user's existing agent session is cleaner, sandbox-safe, and lets the user
-choose the model / tool / cost model themselves.
+### 12.3 Broken-selector recovery strategy
+*Question:* Should the app guess repairs, call an AI CLI, or keep recovery
+manual?
+*Resolution:* Keep recovery explicit. The app records stale/broken status and
+opens the normal re-identify flow. Agents can inspect status via MCP, write a
+known selector with `update_tracker`, or call `identify_element` over the app
+socket to ask the user to pick the element in the visible browser. There is no
+regex-value fallback and no dedicated selector-repair tool.
+*Reason:* Guessing values is worse than showing a broken state, and spawning
+external binaries from a sandboxed app is brittle and review-risky. MCP remains
+the clean automation surface without making selector repair a separate product
+feature.
 
 ### 12.4 Sparkline retention
 *Question:* Last 24, last 7 days, last 30 days?
@@ -1093,11 +1025,11 @@ External clients (user's Codex CLI, Claude Code CLI, optional Homebrew CLI,
 anything else that speaks MCP) connect via the same server. This is the
 **single agent surface**.
 *Resolution:* §13 specifies the full tool set (CRUD, scrape, identify,
-selector packs, widget configs, audit), transport choice (stdio for
-sandboxed App Store path, UNIX socket for always-on local use), auth model
-(socket file permissions + Keychain shared secret), and security
-(human-in-loop on `identify_element`, rate limits on destructive ops, URL
-validation, audit log).
+selector packs, widget configs), transport choice (stdio for headless local
+operations, UNIX socket for always-on app control), auth model (socket file
+permissions + Keychain shared secret), and security (human-in-loop on
+`identify_element`, rate limits on destructive ops, URL validation, local
+diagnostic logging).
 *Reason:* The whole product becomes much more useful when the user's agents
 manage it without clicking through Preferences. This is the natural
 endpoint for "tracker as a generic concept" plus "user's already-paid-for
@@ -1148,10 +1080,10 @@ secret the user can copy by hand is the right level of help.
 ### 12.18 No internal AI CLI invocation (DROPPED)
 *Requirement (canonical state):* The app must never spawn `codex` /
 `claude` / any AI binary itself.
-*Resolution:* `AICLIInvoker.swift` and the bundled-CLI heal path are gone.
-Self-heal that wants AI runs *out of process* through the MCP server,
-called by the user's own agent session. Bundled regex fallback covers the
-no-AI baseline.
+*Resolution:* `AICLIInvoker.swift` and the bundled-CLI repair path are gone.
+If the user wants an AI agent involved, it runs *out of process* and talks to
+the ordinary MCP tools from the user's own agent session. The no-AI baseline is
+clear stale/broken status plus the re-identify flow.
 *Reason:* Spawning external binaries from a sandboxed app is brittle and a
 review risk. Out-of-process via MCP is the clean separation.
 
@@ -1200,9 +1132,9 @@ Two transports, picked at startup based on caller context:
   the same JSON-RPC. Clients can connect without re-launching the app.
   Sandbox permits sockets inside the App Group container.
 
-The agent picks one — typically **stdio** when the agent's MCP config
-defines a server entry; **socket** for power users who run the app
-full-time and want every connecting tool to share the same live process.
+The agent picks one — **stdio** is suitable for headless tracker/configuration
+operations, while **socket** is required for tools that need the live app UI
+(such as opening the visible browser for Identify Element).
 
 ### 13.2 Tool catalog
 
@@ -1210,24 +1142,24 @@ The MCP server exposes the entire app feature set as tools. Initial set:
 
 | Tool | Signature | Description |
 |---|---|---|
+| `get_status` | `() → Status` | Server status, browser profile, transport, data counts, and available tool names. |
 | `list_trackers` | `() → [Tracker]` | Return all trackers with current values, status, last-updated. |
 | `get_tracker` | `(id) → Tracker & {history}` | Current value + sparkline + full config. |
 | `add_tracker` | `(name, url, renderMode, selector, …) → {id}` | Add a tracker. Selector required if known; if absent, agent should call `identify_element` instead. |
-| `update_tracker` | `(id, fields…) → Tracker` | Modify name, label, icon, refresh interval, etc. |
+| `update_tracker` | `(id, fields…) → Tracker` | Modify name, URL, selector, element bounds, label, icon, refresh interval, etc. |
 | `delete_tracker` | `(id) → {ok}` | Remove a tracker (also unlinks from any `widgetConfigurations`). |
-| `update_selector` | `(id, newSelector) → Tracker` | Apply a self-heal fix (used by external AI agents). |
 | `trigger_scrape` | `(id) → TrackerResult` | Force-refresh one tracker now. |
-| `identify_element` | `(url) → {trackerId, status: "awaiting_user"}` | **Human-in-the-loop.** Open the in-app browser at `url`, prompt the user for sign-in + Identify Element. Returns immediately; agent polls `get_tracker` until status flips. |
+| `identify_element` | `(trackerId?, url?) → {trackerId, status: "awaiting_user"}` | **Human-in-the-loop.** Socket-only. Open the in-app browser, prompt the user for sign-in + Identify Element, then update the existing or pending tracker. |
 | `list_widget_configurations` | `() → [WidgetConfiguration]` | All widget compositions. |
+| `get_widget_configuration` | `(id) → WidgetConfiguration` | One widget composition. |
 | `update_widget_configuration` | `(id, fields…) → WidgetConfiguration` | Rename, change template, change size, reorder trackers, change layout. |
+| `delete_widget_configuration` | `(id) → {ok}` | Delete a widget composition. |
 | `export_selector_pack` | `(trackerId) → SelectorPackJSON` | Serialize one tracker as a sharable selector pack. |
 | `import_selector_pack` | `(json) → {trackerId}` | Add a tracker from a selector pack. |
 | `attach_webhook` | `(url \| null) → {ok}` | Set / clear the generic notification webhook. |
-| `get_heal_history` | `(id) → [HealEvent]` | Past selector replacements + outcomes for a tracker. |
 
 Future tools (post-v1, listed for visibility): `pause_tracker`,
-`resume_tracker`, `bulk_export`, `bulk_import`, `subscribe_heal_events`
-(MCP resource for push notifications), `list_widget_templates`.
+`resume_tracker`, `bulk_export`, `bulk_import`, `list_widget_templates`.
 
 ### 13.3 Authentication
 
@@ -1245,20 +1177,19 @@ Future tools (post-v1, listed for visibility): `pause_tracker`,
 
 ### 13.4 Security
 
-- `identify_element` always requires a **human in the loop** — the agent
-  cannot silently add a tracker; the user must complete the capture flow
-  in the visible browser. This prevents an agent (compromised or
-  otherwise) from quietly tracking new pages.
-- `delete_tracker`, `update_widget_configuration`, and `import_selector_pack`
-  are destructive; the app rate-limits them (max 10 per minute per session)
-  and surfaces an undo toast in the main app window.
+- `identify_element` always requires a **human in the loop** and the live app
+  socket transport — the user must complete the capture flow in the visible
+  browser. This prevents an agent (compromised or otherwise) from quietly
+  tracking new pages.
+- `delete_tracker`, `delete_widget_configuration`, `update_widget_configuration`,
+  and `import_selector_pack` are destructive; the app rate-limits them (max 10
+  per minute per session) and surfaces an undo toast in the main app window.
 - All scrape URLs are validated as `https://` only (or `http://localhost`
   for testing). No `file://`, no `javascript:`.
-- The MCP server logs every tool invocation to
+- The MCP server writes a local diagnostic log to
   `~/Library/Logs/macOS Widgets Stats from Website/mcp.log` with timestamp, tool name,
-  caller (stdio child PID or socket-peer creds), and argument fingerprint
-  (no sensitive values). Users can audit what their agents have done from
-  Preferences → MCP → "View audit log".
+  and argument-key fingerprint (no sensitive values). Logging is for support and
+  troubleshooting; there is no in-app audit-log UI.
 - Per-tool rate limits on top of the destructive-op cap above; full table
   ships with the v0.9 implementation tag.
 
@@ -1370,8 +1301,6 @@ Specific things to validate in that review:
   App Store version *requires* Homebrew)?
 - Are the 12 templates each implementable with the data we already capture
   (selector + bbox + render mode + sparkline history)?
-- Does the regex fallback's "ancestor-distance heuristic" survive contact
-  with sites we actually plan to track?
 
 Post-review, this section gets either ticked off or replaced with a
 "Codex review highlights" sub-section before we cut v0.1.

@@ -26,8 +26,6 @@ struct Tracker: Codable, Identifiable {
     var valueParser: ValueParser
     var history: TrackerHistory
     var hideElements: [String]
-    var lastHealedAt: Date?
-    var selectorHistory: [SelectorHistoryEntry]
 
     init(
         id: UUID = UUID(),
@@ -43,9 +41,7 @@ struct Tracker: Codable, Identifiable {
         accentColorHex: String = Tracker.defaultAccentColorHex,
         valueParser: ValueParser = ValueParser(),
         history: TrackerHistory = TrackerHistory(),
-        hideElements: [String] = [],
-        lastHealedAt: Date? = nil,
-        selectorHistory: [SelectorHistoryEntry] = []
+        hideElements: [String] = []
     ) {
         self.id = id
         self.name = name
@@ -61,8 +57,6 @@ struct Tracker: Codable, Identifiable {
         self.valueParser = valueParser
         self.history = history
         self.hideElements = hideElements
-        self.lastHealedAt = lastHealedAt
-        self.selectorHistory = selectorHistory
     }
 
     init(from decoder: Decoder) throws {
@@ -85,8 +79,6 @@ struct Tracker: Codable, Identifiable {
         valueParser = try container.decodeIfPresent(ValueParser.self, forKey: .valueParser) ?? ValueParser()
         history = try container.decodeIfPresent(TrackerHistory.self, forKey: .history) ?? TrackerHistory()
         hideElements = try container.decodeIfPresent([String].self, forKey: .hideElements) ?? []
-        lastHealedAt = try container.decodeIfPresent(Date.self, forKey: .lastHealedAt)
-        selectorHistory = try container.decodeIfPresent([SelectorHistoryEntry].self, forKey: .selectorHistory) ?? []
     }
 }
 
@@ -130,15 +122,5 @@ struct TrackerHistory: Codable, Equatable {
         self.retentionPolicy = retentionPolicy
         self.retentionValue = retentionValue
         self.displayWindow = displayWindow
-    }
-}
-
-struct SelectorHistoryEntry: Codable, Equatable {
-    var selector: String
-    var replacedAt: Date
-
-    init(selector: String, replacedAt: Date = Date()) {
-        self.selector = selector
-        self.replacedAt = replacedAt
     }
 }

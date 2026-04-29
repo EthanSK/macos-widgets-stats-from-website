@@ -18,8 +18,8 @@ refreshing in the background.
 [Website](https://ethansk.github.io/macos-widgets-stats-from-website/) · [Direct download](https://github.com/EthanSK/macos-widgets-stats-from-website/releases/latest/download/MacosWidgetsStatsFromWebsite-latest.zip) · [Architecture (PLAN.md)](PLAN.md) · [Issues](https://github.com/EthanSK/macos-widgets-stats-from-website/issues) · [Releases](https://github.com/EthanSK/macos-widgets-stats-from-website/releases)
 
 > **Status:** v0.12.2 implements the local app, widget extension, CLI, scraping,
-> snapshot rendering, widget template catalog, self-heal prompts, selector
-> packs, MCP server, first-launch flow, and polish pass. Read
+> snapshot rendering, widget template catalog, selector packs, MCP server,
+> first-launch flow, and polish pass. Read
 > [PLAN.md](PLAN.md) for the canonical architecture and roadmap.
 
 ---
@@ -60,8 +60,7 @@ See [docs/release.md](docs/release.md) for release setup and validation gates.
   30-minute full reload heartbeat.
 - Twelve WidgetKit templates for small, medium, large, and macOS 14 extra-large
   families, with separate widget configurations per widget instance.
-- Self-heal prompts after repeated scrape failures, bundled numeric fallback
-  extraction, and an audit log of selector-heal attempts.
+- Clear broken-tracker status and a re-identify flow when a page layout changes.
 - Embedded MCP server over stdio and a `0600` UNIX socket with Keychain-backed
   shared-token auth.
 - Selector packs for importing and exporting trusted, script-free tracker
@@ -100,23 +99,25 @@ shape and migration strategy.
 
 The app embeds an MCP server. Any external MCP client — your Codex CLI, Claude
 Code session, or anything else that speaks MCP — can connect to it and manage
-trackers, trigger scrapes, or apply self-heal fixes. The app itself never
-spawns AI binaries; agent involvement always runs in your own agent's session.
-See [PLAN.md §13 MCP Server](PLAN.md#13-mcp-server) for transport, auth, and
-the tool catalog.
+trackers, trigger scrapes, request the visible element-identification flow, and
+manage widget configurations. The app itself never spawns AI binaries; agent
+involvement always runs in your own agent's session. See
+[PLAN.md §13 MCP Server](PLAN.md#13-mcp-server) for transport, auth, and the
+tool catalog.
 
 The server listens on stdio when launched as an MCP subprocess and on
 `~/Library/Application Support/MacosWidgetsStatsFromWebsite/mcp.sock` for local socket
-clients. Retrieve the shared token from the app's Keychain-backed MCP
-configuration and send it with `X-Auth` or the initialization message.
+clients. Retrieve the shared token from Preferences → MCP and send it with
+`X-Auth` or the initialization message. Use the socket transport when an agent
+needs to open the app's visible browser for Identify Element; stdio is suitable
+for headless tracker/configuration operations.
 
 ## Caveats
 
 - **Scrapes via in-app browser.** The app signs in *as you* via a sandboxed
   WKWebView profile. Cookies stay on your machine. No third-party server is
-  involved. If a site changes its layout the app prompts you to re-Identify
-  the element, with a regex fallback to keep showing *something* until you
-  fix it. (See [PLAN.md §8 Self-heal flow](PLAN.md#8-self-heal-flow).)
+  involved. If a site changes its layout the app marks the tracker stale or
+  broken after repeated failures and prompts you to re-identify the element.
 - **macOS has no widget reload budget.** Apple's per-instance ~40–72/day cap
   is iOS-only ([Apple forum 711091](https://developer.apple.com/forums/thread/711091)).
   On macOS the app refreshes the widget whenever a meaningful new reading
