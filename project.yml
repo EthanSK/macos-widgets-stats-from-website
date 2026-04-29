@@ -51,8 +51,8 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
-        CFBundleShortVersionString: "0.12.1"
-        CFBundleVersion: "1201"
+        CFBundleShortVersionString: "0.12.2"
+        CFBundleVersion: "1202"
         CFBundleDocumentTypes:
           - CFBundleTypeName: MacosStatsWidget Selector Pack
             CFBundleTypeRole: Editor
@@ -88,6 +88,8 @@ targets:
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.application-groups:
           - group.com.ethansk.macos-stats-widget
+        keychain-access-groups:
+          - "$(AppIdentifierPrefix)com.ethansk.macos-stats-widget"
 
   MacosStatsWidgetWidget:
     type: app-extension
@@ -114,8 +116,8 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
-        CFBundleShortVersionString: "0.12.1"
-        CFBundleVersion: "1201"
+        CFBundleShortVersionString: "0.12.2"
+        CFBundleVersion: "1202"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
@@ -147,14 +149,18 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
-        CFBundleShortVersionString: "0.12.1"
-        CFBundleVersion: "1201"
+        CFBundleShortVersionString: "0.12.2"
+        CFBundleVersion: "1202"
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
     entitlements:
       path: MacosStatsWidget/Apps/CLI/MacosStatsWidgetCLI.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
+        com.apple.security.application-groups:
+          - group.com.ethansk.macos-stats-widget
+        keychain-access-groups:
+          - "$(AppIdentifierPrefix)com.ethansk.macos-stats-widget"
 
 schemes:
   MacosStatsWidget:

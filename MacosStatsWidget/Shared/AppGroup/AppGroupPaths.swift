@@ -41,6 +41,10 @@ enum AppGroupPaths {
     }
 
     static func mcpApplicationSupportURL() -> URL {
+        if let sharedContainerURL = sharedContainerURL() {
+            return sharedContainerURL
+        }
+
         let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return baseURL.appendingPathComponent("MacosStatsWidget", isDirectory: true)
     }

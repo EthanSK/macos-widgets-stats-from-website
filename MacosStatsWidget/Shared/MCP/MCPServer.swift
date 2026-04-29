@@ -257,7 +257,7 @@ private final class MCPConnectionSession {
                 "protocolVersion": "2024-11-05",
                 "serverInfo": [
                     "name": "macos-stats-widget",
-                    "version": "0.9.0"
+                    "version": "0.12.2"
                 ],
                 "capabilities": [
                     "tools": [:]
@@ -776,7 +776,26 @@ private enum MCPToolDispatcher {
     }
 
     private static func updateWidgetConfiguration(_ arguments: [String: Any]) throws -> Any {
-        let id = (arguments["id"] as? String).flatMap(UUID.init(uuidString:)) ?? UUID()
+        let id: UUID
+        if let idString = arguments["id"] as? String {
+            guard let parsedID = UUID(uuidString: idString) else {
+                throw MCPError.invalidParams("id must be a valid widget configuration UUID.")
+            }
+            id = parsedID
+        } else {
+            id = UUID()
+        }
+
+        if arguments.keys.contains("templateID"), widgetTemplateArgument(arguments["templateID"]) == nil {
+            throw MCPError.invalidParams("templateID is not a supported widget template.")
+        }
+        if arguments.keys.contains("size"), widgetSizeArgument(arguments["size"]) == nil {
+            throw MCPError.invalidParams("size is not a supported widget size.")
+        }
+        if arguments.keys.contains("layout"), widgetLayoutArgument(arguments["layout"]) == nil {
+            throw MCPError.invalidParams("layout is not a supported widget layout.")
+        }
+
         var updatedConfiguration: WidgetConfiguration?
 
         try AppGroupStore.mutateSharedConfiguration { configuration in
@@ -790,17 +809,31 @@ private enum MCPToolDispatcher {
             let layout = widgetLayoutArgument(arguments["layout"])
                 ?? existingIndex.map { configuration.widgetConfigurations[$0].layout }
                 ?? template.defaultLayout
-            let trackerIDs = uuidArrayArgument("trackerIDs", arguments)
+            let trackerIDs = try uuidArrayArgument("trackerIDs", arguments)
                 ?? existingIndex.map { configuration.widgetConfigurations[$0].trackerIDs }
                 ?? []
             let name = (arguments["name"] as? String)
                 ?? existingIndex.map { configuration.widgetConfigurations[$0].name }
                 ?? "\(template.displayName) Widget"
+            let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !trimmedName.isEmpty else {
+                throw MCPError.validation("Widget configuration name cannot be empty.")
+            }
+
+            let availableTrackerIDs = Set(configuration.trackers.map(\.id))
+            let missingTrackerIDs = trackerIDs.filter { !availableTrackerIDs.contains($0) }
+            guard missingTrackerIDs.isEmpty else {
+                throw MCPError.validation("Unknown trackerIDs: \(missingTrackerIDs.map(\.uuidString).joined(separator: ", ")).")
+            }
+            guard template.slotCount.contains(trackerIDs.count) else {
+                throw MCPError.validation("\(template.displayName) requires \(slotCountDescription(template.slotCount)); got \(trackerIDs.count).")
+            }
 
             var widgetConfiguration = existingIndex.map { configuration.widgetConfigurations[$0] }
                 ?? WidgetConfiguration(name: name, templateID: template)
             widgetConfiguration.id = id
-            widgetConfiguration.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            widgetConfiguration.name = trimmedName
             widgetConfiguration.templateID = template
             widgetConfiguration.size = size
             widgetConfiguration.layout = layout
@@ -1016,11 +1049,28 @@ private enum MCPToolDispatcher {
         return id
     }
 
-    private static func uuidArrayArgument(_ key: String, _ arguments: [String: Any]) -> [UUID]? {
-        guard let values = arguments[key] as? [String] else {
+    private static func uuidArrayArgument(_ key: String, _ arguments: [String: Any]) throws -> [UUID]? {
+        guard arguments.keys.contains(key) else {
             return nil
         }
-        return values.compactMap(UUID.init(uuidString:))
+
+        guard let values = arguments[key] as? [String] else {
+            throw MCPError.invalidParams("\(key) must be an array of UUID strings.")
+        }
+
+        var ids: [UUID] = []
+        for value in values {
+            guard let id = UUID(uuidString: value) else {
+                throw MCPError.invalidParams("\(key) contains an invalid UUID: \(value).")
+            }
+            ids.append(id)
+        }
+
+        guard Set(ids).count == ids.count else {
+            throw MCPError.validation("\(key) cannot contain duplicate tracker IDs.")
+        }
+
+        return ids
     }
 
     private static func intArgument(_ key: String, _ arguments: [String: Any]) -> Int? {
@@ -1084,6 +1134,14 @@ private enum MCPToolDispatcher {
             throw MCPError.validation(message)
         }
         return value
+    }
+
+    private static func slotCountDescription(_ range: ClosedRange<Int>) -> String {
+        if range.lowerBound == range.upperBound {
+            return "\(range.lowerBound) tracker\(range.lowerBound == 1 ? "" : "s")"
+        }
+
+        return "\(range.lowerBound)-\(range.upperBound) trackers"
     }
 }
 

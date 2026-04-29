@@ -9,7 +9,11 @@ import AppKit
 
 enum DockBadgeUpdater {
     static func update() {
-        let brokenCount = AppGroupStore.loadReadings().readings.values.filter { $0.status == .broken }.count
+        let activeTrackerIDs = Set(AppGroupStore.loadSharedConfiguration().trackers.map { $0.id.uuidString })
+        let brokenCount = AppGroupStore.loadReadings().readings.filter { id, reading in
+            activeTrackerIDs.contains(id) && reading.status == .broken
+        }.count
+
         DispatchQueue.main.async {
             NSApp.dockTile.badgeLabel = brokenCount > 0 ? "\(brokenCount)" : nil
         }

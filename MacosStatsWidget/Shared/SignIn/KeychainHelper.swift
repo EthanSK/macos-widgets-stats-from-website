@@ -25,14 +25,33 @@ enum KeychainHelper {
 
     static let mcpService = "mcp-secret"
     static let mcpAccount = "macos-stats-widget"
+    private static let keychainAccessGroupsEntitlement = "keychain-access-groups"
+    private static let sharedAccessGroupSuffix = ".com.ethansk.macos-stats-widget"
 
     static func saveGenericPassword(_ password: String, service: String, account: String) throws {
+        var lastError: Error?
+        for accessGroup in accessGroupCandidates() {
+            do {
+                try saveGenericPassword(password, service: service, account: account, accessGroup: accessGroup)
+                return
+            } catch {
+                lastError = error
+            }
+        }
+
+        throw lastError ?? KeychainError.unexpectedStatus(errSecInternalError)
+    }
+
+    private static func saveGenericPassword(_ password: String, service: String, account: String, accessGroup: String?) throws {
         let data = Data(password.utf8)
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
+        if let accessGroup {
+            query[kSecAttrAccessGroup as String] = accessGroup
+        }
 
         SecItemDelete(query as CFDictionary)
 
@@ -47,13 +66,35 @@ enum KeychainHelper {
     }
 
     static func readGenericPassword(service: String, account: String) throws -> String? {
-        let query: [String: Any] = [
+        var lastError: Error?
+        for accessGroup in accessGroupCandidates() {
+            do {
+                if let password = try readGenericPassword(service: service, account: account, accessGroup: accessGroup) {
+                    return password
+                }
+            } catch {
+                lastError = error
+            }
+        }
+
+        if let lastError, accessGroupCandidates().count == 1 {
+            throw lastError
+        }
+
+        return nil
+    }
+
+    private static func readGenericPassword(service: String, account: String, accessGroup: String?) throws -> String? {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
+        if let accessGroup {
+            query[kSecAttrAccessGroup as String] = accessGroup
+        }
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -72,6 +113,25 @@ enum KeychainHelper {
         }
 
         return password
+    }
+
+    private static func accessGroupCandidates() -> [String?] {
+        var candidates: [String?] = []
+        if let accessGroup = sharedKeychainAccessGroup() {
+            candidates.append(accessGroup)
+        }
+        candidates.append(nil)
+        return candidates
+    }
+
+    private static func sharedKeychainAccessGroup() -> String? {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(task, keychainAccessGroupsEntitlement as CFString, nil) else {
+            return nil
+        }
+
+        let groups = value as? [String] ?? []
+        return groups.first { $0.hasSuffix(sharedAccessGroupSuffix) }
     }
 
     @discardableResult

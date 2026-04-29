@@ -157,6 +157,7 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
             }
 
             let previousURL = tracker.url
+            let previousSnapshotInterval = snapshotInterval(for: tracker)
             tracker = newTracker
             if let bbox = newTracker.elementBoundingBox {
                 cachedRect = CGRect(x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height)
@@ -164,6 +165,12 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
 
             if previousURL != newTracker.url {
                 loadInitialPage()
+            } else if previousSnapshotInterval != snapshotInterval(for: newTracker) {
+                snapshotTimer?.invalidate()
+                snapshotTimer = nil
+                if isLoaded {
+                    scheduleTimers()
+                }
             }
         }
     }
@@ -253,10 +260,11 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
 
     private func scheduleTimers() {
         if snapshotTimer == nil {
-            snapshotTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            let interval = snapshotInterval(for: tracker)
+            snapshotTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
                 self?.snapshotNow()
             }
-            snapshotTimer?.tolerance = 0.2
+            snapshotTimer?.tolerance = min(max(interval * 0.1, 0.2), 60)
         }
 
         if heartbeatTimer == nil {
@@ -265,6 +273,10 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
             }
             heartbeatTimer?.tolerance = 60
         }
+    }
+
+    private func snapshotInterval(for tracker: Tracker) -> TimeInterval {
+        TimeInterval(max(1, tracker.refreshIntervalSec))
     }
 
     private func reloadForHeartbeat() {
