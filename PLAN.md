@@ -913,7 +913,7 @@ manual?
 opens the normal re-identify flow. Agents can inspect status via MCP, write a
 known selector with `update_tracker`, or call `identify_element` over the app
 socket to ask the user to pick the element in the visible browser. There is no
-regex-value fallback and no dedicated selector-repair tool.
+automatic value guessing and no dedicated selector-repair feature.
 *Reason:* Guessing values is worse than showing a broken state, and spawning
 external binaries from a sandboxed app is brittle and review-risky. MCP remains
 the clean automation surface without making selector repair a separate product
