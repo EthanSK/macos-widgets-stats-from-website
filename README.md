@@ -2,9 +2,11 @@
 
 **See any number on any logged-in webpage at a glance — without opening another tab.**
 
-[![Status](https://img.shields.io/badge/status-planning-orange.svg)](PLAN.md)
+[![Status](https://img.shields.io/badge/status-v0.2-orange.svg)](PLAN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS%2014%2B-blue.svg)](#)
+[![Website](https://img.shields.io/badge/website-ethansk.github.io-7eecaf.svg)](https://ethansk.github.io/macos-stats-widget/)
+[![Latest release](https://img.shields.io/github/v/release/EthanSK/macos-stats-widget?include_prereleases&sort=semver&label=release&color=ffe27a)](https://github.com/EthanSK/macos-stats-widget/releases)
 
 A native macOS WidgetKit app that surfaces scraped values from any web page you
 log into — Codex usage, Claude Code spend, OpenAI dashboard, your AWS bill,
@@ -12,9 +14,12 @@ your bank balance, anything that has a number or visual region on a page.
 Configure it once with a click-to-pick element flow, and the widget keeps
 refreshing in the background.
 
-> **Status:** Planning. No code yet. Read [PLAN.md](PLAN.md) for the canonical
-> v0.0.4 architecture proposal. Implementation starts at v0.1 once the plan is
-> signed off.
+[Website](https://ethansk.github.io/macos-stats-widget/) · [Architecture (PLAN.md)](PLAN.md) · [Issues](https://github.com/EthanSK/macos-stats-widget/issues) · [Releases](https://github.com/EthanSK/macos-stats-widget/releases)
+
+> **Status:** Implementation in progress. v0.1 ships the Xcode scaffold; v0.2
+> ships the Preferences UI. Read [PLAN.md](PLAN.md) for the canonical v0.0.4
+> architecture; see [the website](https://ethansk.github.io/macos-stats-widget/)
+> for the public-facing tour and template gallery.
 
 ---
 
@@ -81,6 +86,15 @@ the tool catalog.
   user tool that reads pages you can already see in your own browser.
 - **TOS responsibility is yours.** Some sites disallow scraping in their
   terms. The app treats every site equally; you decide what to point it at.
+
+## Contributing
+
+Issues and PRs welcome at
+[github.com/EthanSK/macos-stats-widget](https://github.com/EthanSK/macos-stats-widget).
+Read [PLAN.md](PLAN.md) before opening a structural PR — that's the canonical
+architecture document and the place where intent gets argued out before code
+gets written. Bug reports and template suggestions can go straight to
+[Issues](https://github.com/EthanSK/macos-stats-widget/issues).
 
 ## License
 
