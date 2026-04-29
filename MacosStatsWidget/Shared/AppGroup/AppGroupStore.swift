@@ -99,6 +99,64 @@ final class AppGroupStore: ObservableObject {
         }
     }
 
+    static func loadReadings() -> TrackerReadingsFile {
+        guard let url = AppGroupPaths.appGroupReadingsURL(),
+              let data = try? Data(contentsOf: url) else {
+            return .empty
+        }
+
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let file = try decoder.decode(TrackerReadingsFile.self, from: data)
+            guard file.schemaVersion == currentSchemaVersion else {
+                return .empty
+            }
+            return file
+        } catch {
+            return .empty
+        }
+    }
+
+    static func reading(for trackerID: UUID) -> TrackerReading? {
+        loadReadings().readings[trackerID.uuidString]
+    }
+
+    static func record(reading newReading: TrackerReading, for tracker: Tracker) throws {
+        var file = loadReadings()
+        let key = tracker.id.uuidString
+        let existingSparkline = file.readings[key]?.sparkline ?? []
+        var reading = newReading
+
+        if let numeric = reading.currentNumeric {
+            let displayWindow = max(1, tracker.history.displayWindow)
+            reading.sparkline = Array((existingSparkline + [numeric]).suffix(displayWindow))
+        } else if reading.sparkline.isEmpty {
+            reading.sparkline = existingSparkline
+        }
+
+        file.schemaVersion = currentSchemaVersion
+        file.readings[key] = reading
+        try write(readingsFile: file)
+    }
+
+    static func recordFailure(message: String, for tracker: Tracker) throws {
+        let existing = reading(for: tracker.id)
+        let failureCount = (existing?.status == .broken ? 3 : 1)
+        let status: TrackerStatus = failureCount >= 3 ? .broken : .stale
+        let reading = TrackerReading(
+            currentValue: existing?.currentValue,
+            currentNumeric: existing?.currentNumeric,
+            snapshotPath: existing?.snapshotPath,
+            snapshotCapturedAt: existing?.snapshotCapturedAt,
+            lastUpdatedAt: existing?.lastUpdatedAt,
+            status: status,
+            sparkline: existing?.sparkline ?? [],
+            lastError: message
+        )
+        try record(reading: reading, for: tracker)
+    }
+
     private static func loadConfiguration() -> AppConfiguration {
         let url = AppGroupPaths.canonicalTrackersURL()
 
@@ -120,6 +178,18 @@ final class AppGroupStore: ObservableObject {
     }
 
     private static func write(configuration: AppConfiguration, to destinationURL: URL) throws {
+        try writeJSON(configuration, to: destinationURL)
+    }
+
+    private static func write(readingsFile: TrackerReadingsFile) throws {
+        guard let url = AppGroupPaths.appGroupReadingsURL() else {
+            return
+        }
+
+        try writeJSON(readingsFile, to: url)
+    }
+
+    private static func writeJSON<T: Encodable>(_ value: T, to destinationURL: URL) throws {
         let fileManager = FileManager.default
         let directoryURL = destinationURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
@@ -127,7 +197,7 @@ final class AppGroupStore: ObservableObject {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(configuration)
+        let data = try encoder.encode(value)
 
         let temporaryURL = directoryURL.appendingPathComponent(".\(destinationURL.lastPathComponent).tmp-\(UUID().uuidString)")
         try data.write(to: temporaryURL, options: .atomic)

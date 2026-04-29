@@ -9,6 +9,7 @@ import SwiftUI
 
 struct TrackersListView: View {
     @EnvironmentObject private var store: AppGroupStore
+    @EnvironmentObject private var backgroundScheduler: BackgroundScheduler
     @State private var selectedTrackerID: UUID?
     @State private var editorPresentation: TrackerEditorPresentation?
 
@@ -62,6 +63,14 @@ struct TrackersListView: View {
                 }
                 .disabled(selectedTracker == nil)
                 .help("Edit Tracker")
+
+                Button {
+                    scrapeSelected()
+                } label: {
+                    Label("Scrape Now", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(selectedTracker == nil)
+                .help("Scrape Now")
             }
         }
         .sheet(item: $editorPresentation) { presentation in
@@ -99,6 +108,14 @@ struct TrackersListView: View {
         }
 
         edit(selectedTracker)
+    }
+
+    private func scrapeSelected() {
+        guard let selectedTrackerID else {
+            return
+        }
+
+        backgroundScheduler.triggerScrapeNow(trackerID: selectedTrackerID)
     }
 
     private func edit(_ tracker: Tracker) {
