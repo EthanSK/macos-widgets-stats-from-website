@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0a0d10"/>
+      <stop offset="1" stop-color="#070909"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="0.18" cy="0.2" r="0.5">
+      <stop offset="0" stop-color="#7eecaf" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#7eecaf" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.85" cy="0.85" r="0.5">
+      <stop offset="0" stop-color="#ffe27a" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#ffe27a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="acc" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#7eecaf"/>
+      <stop offset="1" stop-color="#ffe27a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow1)"/>
+  <rect width="1200" height="630" fill="url(#glow2)"/>
+
+  <!-- mark -->
+  <g transform="translate(80, 80)">
+    <rect x="0" y="0" width="64" height="64" rx="14" fill="#11161c" stroke="rgba(255,255,255,0.08)" stroke-width="1.4"/>
+    <rect x="9" y="9" width="22" height="22" rx="5" fill="#7eecaf"/>
+    <rect x="33" y="9" width="22" height="22" rx="5" fill="rgba(255,255,255,0.07)"/>
+    <rect x="9" y="33" width="22" height="22" rx="5" fill="rgba(255,255,255,0.07)"/>
+    <rect x="33" y="33" width="22" height="22" rx="5" fill="#ffe27a"/>
+  </g>
+  <text x="160" y="120" font-family="-apple-system, SF Pro Text, system-ui" font-size="22" font-weight="600" fill="#eef2f6">macOS Stats Widget</text>
+  <text x="160" y="148" font-family="ui-monospace, SF Mono, monospace" font-size="13" fill="#8b98a8" letter-spacing="2">NATIVE · MACOS 14+ · MIT</text>
+
+  <!-- headline -->
+  <text x="80" y="290" font-family="-apple-system, SF Pro Display, system-ui" font-size="84" font-weight="600" fill="#eef2f6" letter-spacing="-3">Any number.</text>
+  <text x="80" y="380" font-family="-apple-system, SF Pro Display, system-ui" font-size="84" font-weight="600" letter-spacing="-3" fill="url(#acc)">Any webpage.</text>
+  <text x="80" y="470" font-family="-apple-system, SF Pro Display, system-ui" font-size="84" font-weight="600" fill="#eef2f6" letter-spacing="-3">On your desktop.</text>
+
+  <text x="80" y="540" font-family="-apple-system, SF Pro Text, system-ui" font-size="20" fill="#c7cfd9">A native macOS WidgetKit app for the values you keep refreshing.</text>
+
+  <!-- example tile, top right -->
+  <g transform="translate(840, 200)">
+    <rect width="280" height="280" rx="22" fill="#11161e" stroke="rgba(255,255,255,0.08)"/>
+    <text x="20" y="40" font-family="ui-monospace, SF Mono, monospace" font-size="14" fill="#8b98a8" letter-spacing="2">CODEX · WEEKLY</text>
+    <text x="20" y="160" font-family="-apple-system-rounded, SF Pro Rounded, system-ui" font-size="100" font-weight="600" fill="#eef2f6" letter-spacing="-3">$42.<tspan font-size="60" fill="#8b98a8">18</tspan></text>
+    <circle cx="22" cy="248" r="5" fill="#5fd28f"/>
+    <text x="34" y="252" font-family="-apple-system, SF Pro Text, system-ui" font-size="14" fill="#8b98a8">updated 4m ago</text>
+    <!-- sparkline -->
+    <path d="M20,210 L60,196 L100,200 L140,180 L180,184 L220,168 L260,172" fill="none" stroke="#7eecaf" stroke-width="2"/>
+  </g>
+</svg>

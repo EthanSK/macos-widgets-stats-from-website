@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>macOS Stats Widget — Native widgets for any number on any webpage</title>
+    <meta
+      name="description"
+      content="A native macOS WidgetKit app that surfaces any number from any logged-in webpage to your desktop. Configure it once, glance forever. No tabs, no dashboards, no context-switching."
+    />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="https://ethansk.github.io/macos-stats-widget/" />
+    <meta name="application-name" content="macOS Stats Widget" />
+    <meta name="apple-mobile-web-app-title" content="macOS Stats Widget" />
+    <meta name="theme-color" content="#0a0d10" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a0d10'/%3E%3Crect x='8' y='8' width='22' height='22' rx='5' fill='%237eecaf'/%3E%3Crect x='34' y='8' width='22' height='22' rx='5' fill='%23ffffff' fill-opacity='0.08'/%3E%3Crect x='8' y='34' width='22' height='22' rx='5' fill='%23ffffff' fill-opacity='0.08'/%3E%3Crect x='34' y='34' width='22' height='22' rx='5' fill='%23ffe27a'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+
+    <!-- Open Graph -->
+    <meta property="og:site_name" content="macOS Stats Widget" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_GB" />
+    <meta property="og:url" content="https://ethansk.github.io/macos-stats-widget/" />
+    <meta property="og:title" content="macOS Stats Widget — Native widgets for any number on any webpage" />
+    <meta property="og:description" content="A native macOS WidgetKit app that surfaces any number from any logged-in webpage to your desktop. Configure it once, glance forever." />
+    <meta property="og:image" content="https://ethansk.github.io/macos-stats-widget/assets/og-image.svg" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="macOS Stats Widget — Native widgets for any number on any webpage" />
+    <meta name="twitter:description" content="A native macOS WidgetKit app that surfaces any number from any logged-in webpage to your desktop." />
+    <meta name="twitter:image" content="https://ethansk.github.io/macos-stats-widget/assets/og-image.svg" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "macOS Stats Widget",
+        "applicationCategory": "UtilityApplication",
+        "operatingSystem": "macOS 14+",
+        "description": "A native macOS WidgetKit app that surfaces any number from any logged-in webpage to your desktop.",
+        "url": "https://ethansk.github.io/macos-stats-widget/",
+        "downloadUrl": "https://github.com/EthanSK/macos-stats-widget/releases",
+        "sameAs": "https://github.com/EthanSK/macos-stats-widget",
+        "license": "https://opensource.org/license/mit"
+      }
+    </script>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="ambient" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="#top">
+        <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+          <rect x="2" y="2" width="60" height="60" rx="14" fill="#11161c" stroke="rgba(255,255,255,0.08)" stroke-width="1.2"/>
+          <rect x="9" y="9" width="22" height="22" rx="5" fill="url(#g1)"/>
+          <rect x="33" y="9" width="22" height="22" rx="5" fill="rgba(255,255,255,0.07)"/>
+          <rect x="9" y="33" width="22" height="22" rx="5" fill="rgba(255,255,255,0.07)"/>
+          <rect x="33" y="33" width="22" height="22" rx="5" fill="url(#g2)"/>
+          <defs>
+            <linearGradient id="g1" x1="0" x2="1" y1="0" y2="1">
+              <stop offset="0" stop-color="#7eecaf"/>
+              <stop offset="1" stop-color="#34c474"/>
+            </linearGradient>
+            <linearGradient id="g2" x1="0" x2="1" y1="0" y2="1">
+              <stop offset="0" stop-color="#ffe27a"/>
+              <stop offset="1" stop-color="#f0a93b"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <span class="brand-words">
+          <span class="brand-name">macOS Stats Widget</span>
+          <span class="brand-sub">v0.1 · planning</span>
+        </span>
+      </a>
+      <nav class="topnav" aria-label="Primary">
+        <a href="#why">Why</a>
+        <a href="#how">How</a>
+        <a href="#templates">Templates</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/EthanSK/macos-stats-widget" class="topnav-github" rel="noopener">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <!-- ───────────── HERO ───────────── -->
+      <section class="hero">
+        <div class="hero-inner">
+          <p class="hero-eyebrow"><span class="dot"></span>NATIVE · WIDGETKIT · MACOS 14+</p>
+          <h1 class="hero-title">
+            <span class="hero-line">Any number.</span>
+            <span class="hero-line"><span class="hero-accent">Any webpage.</span></span>
+            <span class="hero-line">On your desktop.</span>
+          </h1>
+          <p class="hero-tag">
+            A native macOS widget that scrapes any value from any logged-in
+            page — your Codex spend, your AWS bill, your bank balance, the
+            number on whatever dashboard you keep refreshing — and pins it
+            to your desktop. Configure it once, glance forever.
+          </p>
+          <div class="hero-cta">
+            <a class="btn btn-primary" href="#install">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12-1.03.396-2.13 1.077-2.99.764-.9 2.02-1.49 2.937-1.66.05.34.15.68.15 1zm4.565 15.71c-.03.07-.46 1.58-1.55 3.14-.95 1.34-1.94 2.71-3.5 2.71-1.55 0-1.94-.92-3.69-.92-1.71 0-2.34.94-3.75.94-1.55 0-2.59-1.27-3.59-2.61-1.62-2.21-2.85-6.18-1.21-8.93.97-1.65 2.83-2.69 4.78-2.69 1.5 0 2.92.99 3.84.99.93 0 2.67-1.13 4.32-1.13.69 0 2.59.06 3.81 2.07-.1.06-2.27 1.32-2.25 3.95.03 3.13 2.74 4.17 2.78 4.18z"/></svg>
+              Install
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/EthanSK/macos-stats-widget" rel="noopener">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.4.5 0 5.9 0 12.5c0 5.3 3.4 9.7 8.2 11.3.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2.9-.3 2-.4 3-.4s2 .1 3 .4c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.8-1.6 8.2-6 8.2-11.3C24 5.9 18.6.5 12 .5z"/></svg>
+              Source on GitHub
+            </a>
+          </div>
+          <p class="hero-note">MIT-licensed. App Store + Homebrew when v1 ships.</p>
+        </div>
+
+        <!-- Hero composition: floating widget tiles -->
+        <div class="hero-stage" aria-hidden="true">
+          <div class="hero-grid">
+            <!-- Tile 1: small big number -->
+            <div class="tile tile-small tile-1" style="--delay: 0.05s">
+              <div class="tile-title">CODEX · WEEKLY</div>
+              <div class="tile-hero">$42.<span class="tile-hero-cents">18</span></div>
+              <div class="tile-foot"><span class="tile-dot tile-dot-good"></span>updated 4m ago</div>
+            </div>
+
+            <!-- Tile 2: gauge ring -->
+            <div class="tile tile-small tile-2" style="--delay: 0.15s">
+              <div class="tile-title">CLAUDE · CAP</div>
+              <svg class="tile-ring" viewBox="0 0 80 80">
+                <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="6"/>
+                <circle cx="40" cy="40" r="32" fill="none" stroke="#7eecaf" stroke-width="6" stroke-dasharray="201" stroke-dashoffset="68" stroke-linecap="round" transform="rotate(-90 40 40)"/>
+                <text x="40" y="46" text-anchor="middle" fill="#e8edf3" font-size="18" font-weight="600" font-family="ui-monospace, SFMono-Regular, monospace">66%</text>
+              </svg>
+              <div class="tile-foot tile-foot-tight">resets sun</div>
+            </div>
+
+            <!-- Tile 3: medium dashboard 3-up -->
+            <div class="tile tile-medium tile-3" style="--delay: 0.25s">
+              <div class="tile-3up">
+                <div class="tile-3up-col">
+                  <div class="tile-chip" style="--chip:#7eecaf"></div>
+                  <div class="tile-3up-title">CODEX</div>
+                  <div class="tile-3up-val">$42</div>
+                  <div class="tile-3up-delta delta-up">▲ 3.20</div>
+                </div>
+                <div class="tile-3up-col">
+                  <div class="tile-chip" style="--chip:#ffe27a"></div>
+                  <div class="tile-3up-title">CLAUDE</div>
+                  <div class="tile-3up-val">$78</div>
+                  <div class="tile-3up-delta delta-up">▲ 5.00</div>
+                </div>
+                <div class="tile-3up-col">
+                  <div class="tile-chip" style="--chip:#9ec6ff"></div>
+                  <div class="tile-3up-title">AWS</div>
+                  <div class="tile-3up-val">$112</div>
+                  <div class="tile-3up-delta delta-down">▼ 0.40</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tile 4: large stats list -->
+            <div class="tile tile-large tile-4" style="--delay: 0.35s">
+              <div class="tile-title tile-title-pad">AI SPEND · WATCHLIST</div>
+              <ul class="tile-list">
+                <li><span class="tile-chip" style="--chip:#7eecaf"></span><span class="tile-list-name">Codex weekly</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#7eecaf" stroke-width="1.4" points="0,12 8,10 16,11 24,8 32,9 40,5 48,6 60,3"/></svg><span class="tile-list-val">$42.18</span></li>
+                <li><span class="tile-chip" style="--chip:#ffe27a"></span><span class="tile-list-name">Claude monthly</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#ffe27a" stroke-width="1.4" points="0,8 8,9 16,7 24,6 32,8 40,5 48,4 60,2"/></svg><span class="tile-list-val">$78.40</span></li>
+                <li><span class="tile-chip" style="--chip:#9ec6ff"></span><span class="tile-list-name">AWS this month</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#9ec6ff" stroke-width="1.4" points="0,4 8,6 16,5 24,7 32,6 40,8 48,9 60,10"/></svg><span class="tile-list-val">$112.50</span></li>
+                <li><span class="tile-chip" style="--chip:#ff9eb5"></span><span class="tile-list-name">OpenAI tokens</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#ff9eb5" stroke-width="1.4" points="0,10 8,8 16,7 24,5 32,6 40,4 48,3 60,2"/></svg><span class="tile-list-val">14.2M</span></li>
+                <li><span class="tile-chip" style="--chip:#c4a8ff"></span><span class="tile-list-name">Bank · checking</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#c4a8ff" stroke-width="1.4" points="0,2 8,4 16,3 24,5 32,4 40,6 48,7 60,8"/></svg><span class="tile-list-val">$3,184</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────── WHY ───────────── -->
+      <section id="why" class="section section-why">
+        <div class="section-head">
+          <p class="kicker">01 · WHY</p>
+          <h2>Stop refreshing the dashboard.</h2>
+        </div>
+        <div class="prose">
+          <p>
+            You have a number you check too often. The Codex usage page.
+            Your AWS bill. The OpenAI dashboard. Your bank balance. Maybe
+            five different ones, scattered across five different tabs in
+            five different sessions. Each glance costs a context switch
+            you didn't ask for.
+          </p>
+          <p>
+            Every dashboard already knows the value. It's right there in
+            the DOM. The friction isn't computing the number — it's
+            getting your eyes on it without leaving what you're doing.
+          </p>
+          <p class="prose-callout">
+            <strong>The fix:</strong> a native macOS widget that signs into the page <em>as you</em>, finds the value, and pins it to your desktop. Configure once, glance forever.
+          </p>
+        </div>
+      </section>
+
+      <!-- ───────────── HOW ───────────── -->
+      <section id="how" class="section section-how">
+        <div class="section-head">
+          <p class="kicker">02 · HOW IT WORKS</p>
+          <h2>Three steps. Then never again.</h2>
+        </div>
+
+        <ol class="steps">
+          <li class="step">
+            <div class="step-num"><span>01</span></div>
+            <div class="step-illustration step-illu-1" aria-hidden="true">
+              <div class="window">
+                <div class="window-bar"><span></span><span></span><span></span></div>
+                <div class="window-body">
+                  <div class="form-row"><span class="form-label">Name</span><span class="form-input">Codex weekly spend</span></div>
+                  <div class="form-row"><span class="form-label">URL</span><span class="form-input form-mono">https://platform.openai.com/usage</span></div>
+                  <div class="form-row"><span class="form-label">Refresh</span><span class="form-input">every 30 min</span></div>
+                  <span class="form-btn" role="presentation">＋ Identify element</span>
+                </div>
+              </div>
+            </div>
+            <div class="step-copy">
+              <h3>Add the tracker.</h3>
+              <p>Open the app, click <strong>+ Add tracker</strong>, point it at the URL of whatever dashboard, account page, or admin panel holds the number you care about.</p>
+            </div>
+          </li>
+
+          <li class="step step-flip">
+            <div class="step-num"><span>02</span></div>
+            <div class="step-illustration step-illu-2" aria-hidden="true">
+              <div class="window">
+                <div class="window-bar"><span></span><span></span><span></span></div>
+                <div class="window-body window-body-browser">
+                  <div class="browser-page">
+                    <div class="browser-text-row"></div>
+                    <div class="browser-text-row short"></div>
+                    <div class="browser-card">
+                      <div class="browser-card-label">Total this week</div>
+                      <div class="browser-card-value pulse-target">$42.18</div>
+                    </div>
+                    <div class="browser-text-row"></div>
+                    <div class="browser-text-row short"></div>
+                  </div>
+                  <div class="browser-cursor"></div>
+                </div>
+              </div>
+            </div>
+            <div class="step-copy">
+              <h3>Click the value.</h3>
+              <p>The in-app browser opens. Sign in like you normally would. Hit <strong>Identify element</strong>, hover the value until it lights up, click. The app captures the selector and a screenshot region — that's the entire setup.</p>
+            </div>
+          </li>
+
+          <li class="step">
+            <div class="step-num"><span>03</span></div>
+            <div class="step-illustration step-illu-3" aria-hidden="true">
+              <div class="desktop">
+                <div class="desktop-tile">
+                  <div class="tile-title">CODEX · WEEKLY</div>
+                  <div class="tile-hero tile-hero-sm">$42.<span class="tile-hero-cents">18</span></div>
+                  <div class="tile-foot"><span class="tile-dot tile-dot-good"></span>just now</div>
+                </div>
+                <div class="desktop-spark"></div>
+              </div>
+            </div>
+            <div class="step-copy">
+              <h3>Watch it update.</h3>
+              <p>Pick a widget template, drop it on your desktop or in Notification Centre, and the value refreshes in the background. Sites change layout? The app's self-heal flow walks you through re-picking the element — or hand it to your AI agent over MCP.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ───────────── FEATURES ───────────── -->
+      <section id="features" class="section section-features">
+        <div class="section-head">
+          <p class="kicker">03 · WHAT YOU GET</p>
+          <h2>Built for the way macOS actually works.</h2>
+        </div>
+
+        <div class="features-grid">
+          <article class="feat">
+            <div class="feat-icon">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="16" cy="16" r="13"/><path d="M16 8v8l5 3"/></svg>
+            </div>
+            <h3>Track any number</h3>
+            <p>If a value lives in the DOM, the widget can show it. No API. No vendor list. Your trackers are configured per-page by you.</p>
+          </article>
+
+          <article class="feat">
+            <div class="feat-icon">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="10" height="10" rx="2"/><rect x="18" y="4" width="10" height="10" rx="2"/><rect x="4" y="18" width="10" height="10" rx="2"/><rect x="18" y="18" width="10" height="10" rx="2"/></svg>
+            </div>
+            <h3>12 curated templates</h3>
+            <p>Big number, sparkline, gauge ring, watchlist, dashboard 3-up, snapshot tile, mega grid. Small / medium / large / extra-large. <a href="#templates">See the catalog →</a></p>
+          </article>
+
+          <article class="feat">
+            <div class="feat-icon">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 16h7l3-7 4 14 3-7h7"/></svg>
+            </div>
+            <h3>Multi-widget configurations</h3>
+            <p>Compose as many widgets as you want, each with its own template, size, and tracker bindings. One stack for AI spend, another for finances, another for your DAW exports.</p>
+          </article>
+
+          <article class="feat">
+            <div class="feat-icon">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 16C8 8 14 4 16 4s8 4 13 12c-5 8-11 12-13 12S8 24 3 16Z"/><circle cx="16" cy="16" r="4"/></svg>
+            </div>
+            <h3>Headless WKWebView</h3>
+            <p>Background scrapes use the same persistent browser profile as the in-app sign-in. Cookies, sessions, and passkeys persist across launches. No third-party server, no Chromium bundle.</p>
+          </article>
+
+          <article class="feat">
+            <div class="feat-icon">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="6" y="11" width="20" height="15" rx="3"/><path d="M11 11V8a5 5 0 0 1 10 0v3"/></svg>
+            </div>
+            <h3>Persistent sign-in</h3>
+            <p>One named <code>WKWebsiteDataStore</code> shared between the visible browser and the headless scraper. You sign in once. The widget keeps reading.</p>
+          </article>
+
+          <article class="feat">
+            <div class="feat-icon">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 20l-4-4 4-4M24 12l4 4-4 4M19 8l-6 16"/></svg>
+            </div>
+            <h3>Embedded MCP server</h3>
+            <p>Your agent — Codex CLI, Claude Code, anything that speaks MCP — can list trackers, trigger scrapes, fix selectors, and compose widgets, end-to-end. <a href="#mcp">More →</a></p>
+          </article>
+
+          <article class="feat">
+            <div class="feat-icon">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 4l4 8 9 1-7 6 2 9-8-5-8 5 2-9-7-6 9-1z"/></svg>
+            </div>
+            <h3>Self-heal flow</h3>
+            <p>Sites change layout. The widget keeps showing the last-known value, then nudges you to re-pick the element — or applies a regex fallback so something always lands on screen.</p>
+          </article>
+
+          <article class="feat">
+            <div class="feat-icon">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="11" r="3"/><circle cx="23" cy="11" r="3"/><circle cx="9" cy="22" r="3"/><circle cx="23" cy="22" r="3"/><path d="M12 11h8M12 22h8M9 14v5M23 14v5"/></svg>
+            </div>
+            <h3>App Group data plane</h3>
+            <p>Trackers, history, and snapshots live in a shared App Group container. Main app writes; widget extension reads; nothing crosses the network unless you point a tracker at one.</p>
+          </article>
+
+          <article class="feat">
+            <div class="feat-icon">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h24M4 16h24M4 24h24"/><circle cx="10" cy="8" r="2" fill="currentColor"/><circle cx="20" cy="16" r="2" fill="currentColor"/><circle cx="14" cy="24" r="2" fill="currentColor"/></svg>
+            </div>
+            <h3>Native, no Electron</h3>
+            <p>SwiftUI + WidgetKit. Real macOS widgets, real launchd-friendly background activity, real OS-tier privacy. Tiny binary, zero runtime overhead.</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ───────────── TEMPLATES ───────────── -->
+      <section id="templates" class="section section-templates">
+        <div class="section-head">
+          <p class="kicker">04 · TEMPLATE GALLERY</p>
+          <h2>Twelve templates. Pick a shape, bind your trackers.</h2>
+          <p class="section-sub">Each template is laid out to Apple's verified WidgetKit dimensions
+            (155 / 329 / 690 pt wide), with HIG-compliant margins and Dynamic
+            Type-friendly typography.</p>
+        </div>
+
+        <div class="size-stack">
+          <h3 class="size-label"><span>Small</span><span class="size-dim">155 × 155 pt</span></h3>
+          <div class="gallery gallery-small">
+            <figure class="card card-small">
+              <div class="card-frame">
+                <div class="tile tile-small tile-flat">
+                  <div class="tile-title">CODEX · WEEKLY</div>
+                  <div class="tile-hero">$42.<span class="tile-hero-cents">18</span></div>
+                  <div class="tile-foot"><span class="tile-dot tile-dot-good"></span>4m ago</div>
+                </div>
+              </div>
+              <figcaption><strong>01 · Single Big Number</strong><span>Text · 1 tracker</span></figcaption>
+            </figure>
+
+            <figure class="card card-small">
+              <div class="card-frame">
+                <div class="tile tile-small tile-flat">
+                  <div class="tile-title">OPENAI · TODAY</div>
+                  <div class="tile-row-split">
+                    <div class="tile-hero tile-hero-md">14.2M</div>
+                    <svg class="tile-spark-lg" viewBox="0 0 60 30" preserveAspectRatio="none"><path d="M0,22 L8,18 L16,20 L24,14 L32,16 L40,8 L48,10 L60,3" fill="none" stroke="#7eecaf" stroke-width="1.6"/><path d="M0,22 L8,18 L16,20 L24,14 L32,16 L40,8 L48,10 L60,3 L60,30 L0,30 Z" fill="rgba(126,236,175,0.12)"/></svg>
+                  </div>
+                </div>
+              </div>
+              <figcaption><strong>02 · Number + Sparkline</strong><span>Text · 1 tracker · history</span></figcaption>
+            </figure>
+
+            <figure class="card card-small">
+              <div class="card-frame">
+                <div class="tile tile-small tile-flat tile-center">
+                  <div class="tile-title">CLAUDE · CAP</div>
+                  <svg class="tile-ring" viewBox="0 0 80 80">
+                    <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="6"/>
+                    <circle cx="40" cy="40" r="32" fill="none" stroke="#ffe27a" stroke-width="6" stroke-dasharray="201" stroke-dashoffset="40" stroke-linecap="round" transform="rotate(-90 40 40)"/>
+                    <text x="40" y="46" text-anchor="middle" fill="#e8edf3" font-size="18" font-weight="600" font-family="ui-monospace, SFMono-Regular, monospace">82%</text>
+                  </svg>
+                </div>
+              </div>
+              <figcaption><strong>03 · Gauge Ring</strong><span>Text · 1 tracker · min/max</span></figcaption>
+            </figure>
+
+            <figure class="card card-small">
+              <div class="card-frame">
+                <div class="tile tile-small tile-flat tile-snapshot" aria-label="snapshot tile">
+                  <div class="snap-image">
+                    <svg viewBox="0 0 140 140" preserveAspectRatio="xMidYMid slice">
+                      <defs><linearGradient id="snapg1" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#1e2a3a"/><stop offset="1" stop-color="#0e1620"/></linearGradient></defs>
+                      <rect width="140" height="140" fill="url(#snapg1)"/>
+                      <path d="M0,100 L20,82 L40,90 L60,68 L80,76 L100,52 L120,60 L140,40 L140,140 L0,140 Z" fill="rgba(126,236,175,0.25)"/>
+                      <path d="M0,100 L20,82 L40,90 L60,68 L80,76 L100,52 L120,60 L140,40" fill="none" stroke="#7eecaf" stroke-width="1.6"/>
+                    </svg>
+                  </div>
+                  <div class="snap-overlay">openai usage · 18:42</div>
+                </div>
+              </div>
+              <figcaption><strong>04 · Live Snapshot Tile</strong><span>Snapshot · 1 tracker</span></figcaption>
+            </figure>
+          </div>
+
+          <h3 class="size-label"><span>Medium</span><span class="size-dim">329 × 155 pt</span></h3>
+          <div class="gallery gallery-medium">
+            <figure class="card card-medium">
+              <div class="card-frame">
+                <div class="tile tile-medium tile-flat">
+                  <div class="tile-medium-row">
+                    <div class="tile-medium-left">
+                      <div class="tile-title">CODEX · WEEKLY</div>
+                      <div class="tile-hero tile-hero-lg">$42.<span class="tile-hero-cents">18</span></div>
+                    </div>
+                    <div class="tile-medium-right">
+                      <svg class="tile-spark-xl" viewBox="0 0 140 100" preserveAspectRatio="none">
+                        <path d="M0,72 L18,60 L36,66 L54,42 L72,52 L90,28 L108,38 L140,12" fill="none" stroke="#7eecaf" stroke-width="1.8"/>
+                        <path d="M0,72 L18,60 L36,66 L54,42 L72,52 L90,28 L108,38 L140,12 L140,100 L0,100 Z" fill="rgba(126,236,175,0.10)"/>
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <figcaption><strong>05 · Headline + Sparkline</strong><span>Text · 1 tracker · history</span></figcaption>
+            </figure>
+
+            <figure class="card card-medium">
+              <div class="card-frame">
+                <div class="tile tile-medium tile-flat">
+                  <div class="tile-compare">
+                    <div class="tile-compare-side">
+                      <div class="tile-title">CODEX</div>
+                      <div class="tile-hero tile-hero-md">$42</div>
+                      <div class="tile-3up-delta delta-up">▲ 3.20</div>
+                      <svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#7eecaf" stroke-width="1.4" points="0,12 8,10 16,11 24,8 32,9 40,5 48,6 60,3"/></svg>
+                    </div>
+                    <div class="tile-compare-divider"></div>
+                    <div class="tile-compare-side">
+                      <div class="tile-title">CLAUDE</div>
+                      <div class="tile-hero tile-hero-md">$78</div>
+                      <div class="tile-3up-delta delta-up">▲ 5.00</div>
+                      <svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#ffe27a" stroke-width="1.4" points="0,8 8,9 16,7 24,6 32,8 40,5 48,4 60,2"/></svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <figcaption><strong>06 · Dual Stat Compare</strong><span>Text · 2 trackers</span></figcaption>
+            </figure>
+
+            <figure class="card card-medium">
+              <div class="card-frame">
+                <div class="tile tile-medium tile-flat">
+                  <div class="tile-3up tile-3up-pad">
+                    <div class="tile-3up-col"><div class="tile-chip" style="--chip:#7eecaf"></div><div class="tile-3up-title">CODEX</div><div class="tile-3up-val">$42</div><div class="tile-3up-delta delta-up">▲ 3.20</div></div>
+                    <div class="tile-3up-col"><div class="tile-chip" style="--chip:#ffe27a"></div><div class="tile-3up-title">CLAUDE</div><div class="tile-3up-val">$78</div><div class="tile-3up-delta delta-up">▲ 5.00</div></div>
+                    <div class="tile-3up-col"><div class="tile-chip" style="--chip:#9ec6ff"></div><div class="tile-3up-title">AWS</div><div class="tile-3up-val">$112</div><div class="tile-3up-delta delta-down">▼ 0.40</div></div>
+                  </div>
+                </div>
+              </div>
+              <figcaption><strong>07 · Dashboard 3-Up</strong><span>Text · 3 trackers · default</span></figcaption>
+            </figure>
+
+            <figure class="card card-medium">
+              <div class="card-frame">
+                <div class="tile tile-medium tile-flat">
+                  <div class="tile-mixed">
+                    <div class="tile-mixed-snap">
+                      <svg viewBox="0 0 140 140" preserveAspectRatio="xMidYMid slice">
+                        <rect width="140" height="140" fill="#0e1620"/>
+                        <path d="M0,100 L20,82 L40,90 L60,68 L80,76 L100,52 L120,60 L140,40 L140,140 L0,140 Z" fill="rgba(255,226,122,0.22)"/>
+                        <path d="M0,100 L20,82 L40,90 L60,68 L80,76 L100,52 L120,60 L140,40" fill="none" stroke="#ffe27a" stroke-width="1.6"/>
+                      </svg>
+                    </div>
+                    <div class="tile-mixed-text">
+                      <div class="tile-title">MONTHLY · OPENAI</div>
+                      <div class="tile-hero tile-hero-md">$112.50</div>
+                      <div class="tile-foot"><span class="tile-dot tile-dot-good"></span>just now</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <figcaption><strong>08 · Snapshot + Stat</strong><span>Mixed · 2 trackers</span></figcaption>
+            </figure>
+          </div>
+
+          <h3 class="size-label"><span>Large</span><span class="size-dim">329 × 345 pt</span></h3>
+          <div class="gallery gallery-large">
+            <figure class="card card-large">
+              <div class="card-frame">
+                <div class="tile tile-large tile-flat">
+                  <div class="tile-title tile-title-pad">AI SPEND · WATCHLIST</div>
+                  <ul class="tile-list tile-list-tall">
+                    <li><span class="tile-chip" style="--chip:#7eecaf"></span><span class="tile-list-name">Codex weekly</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#7eecaf" stroke-width="1.4" points="0,12 8,10 16,11 24,8 32,9 40,5 48,6 60,3"/></svg><span class="tile-list-val">$42.18</span></li>
+                    <li><span class="tile-chip" style="--chip:#ffe27a"></span><span class="tile-list-name">Claude monthly</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#ffe27a" stroke-width="1.4" points="0,8 8,9 16,7 24,6 32,8 40,5 48,4 60,2"/></svg><span class="tile-list-val">$78.40</span></li>
+                    <li><span class="tile-chip" style="--chip:#9ec6ff"></span><span class="tile-list-name">AWS this month</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#9ec6ff" stroke-width="1.4" points="0,4 8,6 16,5 24,7 32,6 40,8 48,9 60,10"/></svg><span class="tile-list-val">$112.50</span></li>
+                    <li><span class="tile-chip" style="--chip:#ff9eb5"></span><span class="tile-list-name">OpenAI tokens</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#ff9eb5" stroke-width="1.4" points="0,10 8,8 16,7 24,5 32,6 40,4 48,3 60,2"/></svg><span class="tile-list-val">14.2M</span></li>
+                    <li><span class="tile-chip" style="--chip:#c4a8ff"></span><span class="tile-list-name">Bank · checking</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#c4a8ff" stroke-width="1.4" points="0,2 8,4 16,3 24,5 32,4 40,6 48,7 60,8"/></svg><span class="tile-list-val">$3,184</span></li>
+                    <li><span class="tile-chip" style="--chip:#a0f2c8"></span><span class="tile-list-name">Stripe MTD</span><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#a0f2c8" stroke-width="1.4" points="0,14 8,12 16,11 24,9 32,7 40,5 48,4 60,3"/></svg><span class="tile-list-val">$8,921</span></li>
+                  </ul>
+                </div>
+              </div>
+              <figcaption><strong>09 · Stats List (Watchlist)</strong><span>Text · 4–6 trackers · default</span></figcaption>
+            </figure>
+
+            <figure class="card card-large">
+              <div class="card-frame">
+                <div class="tile tile-large tile-flat">
+                  <div class="tile-large-hero">
+                    <div class="tile-title">CODEX · WEEKLY SPEND</div>
+                    <div class="tile-hero tile-hero-xl">$42.<span class="tile-hero-cents">18</span></div>
+                  </div>
+                  <div class="tile-large-mid">
+                    <svg viewBox="0 0 280 80" preserveAspectRatio="none">
+                      <path d="M0,60 L28,46 L56,54 L84,32 L112,40 L140,18 L168,28 L196,12 L224,22 L252,8 L280,16" fill="none" stroke="#7eecaf" stroke-width="1.8"/>
+                      <path d="M0,60 L28,46 L56,54 L84,32 L112,40 L140,18 L168,28 L196,12 L224,22 L252,8 L280,16 L280,80 L0,80 Z" fill="rgba(126,236,175,0.10)"/>
+                    </svg>
+                  </div>
+                  <div class="tile-large-grid">
+                    <div><div class="tile-3up-title">TODAY</div><div class="tile-3up-val">$8</div></div>
+                    <div><div class="tile-3up-title">WEEK</div><div class="tile-3up-val">$42</div></div>
+                    <div><div class="tile-3up-title">MONTH</div><div class="tile-3up-val">$166</div></div>
+                    <div><div class="tile-3up-title">CAP</div><div class="tile-3up-val">66%</div></div>
+                  </div>
+                </div>
+              </div>
+              <figcaption><strong>10 · Hero + Detail</strong><span>Text · 1 tracker · rich</span></figcaption>
+            </figure>
+
+            <figure class="card card-large">
+              <div class="card-frame">
+                <div class="tile tile-large tile-flat tile-snapshot-large">
+                  <svg class="snap-large" viewBox="0 0 320 320" preserveAspectRatio="xMidYMid slice">
+                    <defs><linearGradient id="snapg2" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#1c2738"/><stop offset="1" stop-color="#0a0f17"/></linearGradient></defs>
+                    <rect width="320" height="320" fill="url(#snapg2)"/>
+                    <path d="M0,220 L40,180 L80,200 L120,140 L160,160 L200,90 L240,110 L280,60 L320,80 L320,320 L0,320 Z" fill="rgba(126,236,175,0.18)"/>
+                    <path d="M0,220 L40,180 L80,200 L120,140 L160,160 L200,90 L240,110 L280,60 L320,80" fill="none" stroke="#7eecaf" stroke-width="1.8"/>
+                    <text x="20" y="40" fill="#e8edf3" font-size="14" font-family="ui-monospace, SFMono-Regular, monospace">openai · usage</text>
+                    <text x="20" y="60" fill="#8b9aac" font-size="11" font-family="ui-monospace, SFMono-Regular, monospace">last 7 days</text>
+                  </svg>
+                  <div class="snap-overlay snap-overlay-large">openai usage · 18:42</div>
+                </div>
+              </div>
+              <figcaption><strong>11 · Live Snapshot Hero</strong><span>Snapshot · 1 tracker · full bleed</span></figcaption>
+            </figure>
+          </div>
+
+          <h3 class="size-label"><span>Extra-Large</span><span class="size-dim">690 × 318 pt · macOS only</span></h3>
+          <div class="gallery gallery-xl">
+            <figure class="card card-xl">
+              <div class="card-frame">
+                <div class="tile tile-xl tile-flat">
+                  <div class="tile-xl-grid">
+                    <div class="xl-cell"><div class="tile-chip" style="--chip:#7eecaf"></div><div class="tile-3up-title">CODEX</div><div class="tile-hero tile-hero-md">$42</div><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#7eecaf" stroke-width="1.4" points="0,12 8,10 16,11 24,8 32,9 40,5 48,6 60,3"/></svg></div>
+                    <div class="xl-cell"><div class="tile-chip" style="--chip:#ffe27a"></div><div class="tile-3up-title">CLAUDE</div><div class="tile-hero tile-hero-md">$78</div><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#ffe27a" stroke-width="1.4" points="0,8 8,9 16,7 24,6 32,8 40,5 48,4 60,2"/></svg></div>
+                    <div class="xl-cell"><div class="tile-chip" style="--chip:#9ec6ff"></div><div class="tile-3up-title">AWS</div><div class="tile-hero tile-hero-md">$112</div><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#9ec6ff" stroke-width="1.4" points="0,4 8,6 16,5 24,7 32,6 40,8 48,9 60,10"/></svg></div>
+                    <div class="xl-cell"><div class="tile-chip" style="--chip:#ff9eb5"></div><div class="tile-3up-title">OPENAI</div><div class="tile-hero tile-hero-md">14M</div><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#ff9eb5" stroke-width="1.4" points="0,10 8,8 16,7 24,5 32,6 40,4 48,3 60,2"/></svg></div>
+                    <div class="xl-cell"><div class="tile-chip" style="--chip:#c4a8ff"></div><div class="tile-3up-title">BANK</div><div class="tile-hero tile-hero-md">$3.1k</div><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#c4a8ff" stroke-width="1.4" points="0,2 8,4 16,3 24,5 32,4 40,6 48,7 60,8"/></svg></div>
+                    <div class="xl-cell"><div class="tile-chip" style="--chip:#a0f2c8"></div><div class="tile-3up-title">STRIPE</div><div class="tile-hero tile-hero-md">$8.9k</div><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#a0f2c8" stroke-width="1.4" points="0,14 8,12 16,11 24,9 32,7 40,5 48,4 60,3"/></svg></div>
+                    <div class="xl-cell"><div class="tile-chip" style="--chip:#ffd29e"></div><div class="tile-3up-title">SUBS</div><div class="tile-hero tile-hero-md">$248</div><svg class="tile-spark" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="#ffd29e" stroke-width="1.4" points="0,8 8,8 16,8 24,8 32,8 40,8 48,8 60,8"/></svg></div>
+                    <div class="xl-cell xl-cell-snap">
+                      <svg viewBox="0 0 140 60" preserveAspectRatio="xMidYMid slice">
+                        <rect width="140" height="60" fill="#0e1620"/>
+                        <path d="M0,40 L20,28 L40,32 L60,18 L80,22 L100,8 L120,12 L140,4 L140,60 L0,60 Z" fill="rgba(255,226,122,0.20)"/>
+                        <path d="M0,40 L20,28 L40,32 L60,18 L80,22 L100,8 L120,12 L140,4" fill="none" stroke="#ffe27a" stroke-width="1.4"/>
+                      </svg>
+                      <div class="xl-snap-label">snapshot</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <figcaption><strong>12 · Mega Dashboard Grid</strong><span>Mixed · 6–8 trackers · power user</span></figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────── INSTALL ───────────── -->
+      <section id="install" class="section section-install">
+        <div class="section-head">
+          <p class="kicker">05 · INSTALL</p>
+          <h2>Three paths. Pick what fits.</h2>
+          <p class="section-sub">v0.1 is the Xcode-project scaffold. Distribution channels open as the app reaches feature parity with the plan.</p>
+        </div>
+
+        <div class="install-grid">
+          <article class="install-card install-card-locked">
+            <div class="install-tag">PRIMARY</div>
+            <div class="install-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12-1.03.396-2.13 1.077-2.99.764-.9 2.02-1.49 2.937-1.66.05.34.15.68.15 1zm4.565 15.71c-.03.07-.46 1.58-1.55 3.14-.95 1.34-1.94 2.71-3.5 2.71-1.55 0-1.94-.92-3.69-.92-1.71 0-2.34.94-3.75.94-1.55 0-2.59-1.27-3.59-2.61-1.62-2.21-2.85-6.18-1.21-8.93.97-1.65 2.83-2.69 4.78-2.69 1.5 0 2.92.99 3.84.99.93 0 2.67-1.13 4.32-1.13.69 0 2.59.06 3.81 2.07-.1.06-2.27 1.32-2.25 3.95.03 3.13 2.74 4.17 2.78 4.18z"/></svg></div>
+            <h3>Mac App Store</h3>
+            <p>Sandboxed, signed, auto-updated. The default for everyone who isn't shipping a tracker bundle of their own.</p>
+            <span class="install-soon">Coming with v1.0</span>
+          </article>
+
+          <article class="install-card">
+            <div class="install-tag">CLI · POWER USERS</div>
+            <div class="install-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M7 9l3 3-3 3M13 15h4"/></svg></div>
+            <h3>Homebrew tap</h3>
+            <p>Formula installs the helper CLI alongside the app — for headless config, scripted tracker pushes, and the optional LaunchAgent.</p>
+            <code class="install-cmd">brew install ethansk/macos-stats-widget/macos-stats-widget</code>
+            <span class="install-soon">Tap published with v0.5</span>
+          </article>
+
+          <article class="install-card">
+            <div class="install-tag">DEV · SOURCE</div>
+            <div class="install-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9 4h11M4 4l4 4-4 4M9 12h11M4 20l4-4-4-4M9 20h11"/></svg></div>
+            <h3>Build from source</h3>
+            <p>Clone, regenerate the Xcode project with xcodegen, hit run. v0.1 onwards: open <code>MacosStatsWidget.xcodeproj</code> and build the <code>MacosStatsWidget</code> scheme.</p>
+            <code class="install-cmd">git clone https://github.com/EthanSK/macos-stats-widget &amp;&amp;<br>cd macos-stats-widget &amp;&amp; brew install xcodegen &amp;&amp; xcodegen</code>
+          </article>
+        </div>
+      </section>
+
+      <!-- ───────────── MCP ───────────── -->
+      <section id="mcp" class="section section-mcp">
+        <div class="section-head">
+          <p class="kicker">06 · MCP INTEGRATION</p>
+          <h2>Hand the trackers to your agent.</h2>
+          <p class="section-sub">The main app embeds an MCP server. Any external client — Codex CLI, Claude Code, or any tool that speaks MCP — connects over stdio or a UNIX socket and operates the entire tracker fleet.</p>
+        </div>
+
+        <div class="mcp-row">
+          <div class="mcp-codeblock">
+            <div class="mcp-codebar">
+              <span></span><span></span><span></span>
+              <span class="mcp-codetitle">~/.codex/config.toml</span>
+            </div>
+            <pre class="mcp-pre"><code><span class="tk-com"># MCP server config for Codex / Claude Code</span>
+<span class="tk-key">[mcp_servers.macos_stats_widget]</span>
+<span class="tk-prop">command</span> = <span class="tk-str">"/Applications/macOS Stats Widget.app/Contents/MacOS/macos-stats-widget-mcp"</span>
+<span class="tk-prop">args</span> = []
+<span class="tk-prop">enabled</span> = <span class="tk-num">true</span></code></pre>
+          </div>
+
+          <div class="mcp-tools">
+            <h3>Tool catalog</h3>
+            <ul>
+              <li><code>list_trackers</code><span>All trackers with current values + status.</span></li>
+              <li><code>add_tracker</code><span>Add a tracker by URL + selector.</span></li>
+              <li><code>identify_element</code><span>Human-in-the-loop: opens the in-app browser at <em>url</em>, prompts you to pick, agent polls.</span></li>
+              <li><code>trigger_scrape</code><span>Force-refresh now.</span></li>
+              <li><code>update_selector</code><span>Apply a self-heal fix from the agent.</span></li>
+              <li><code>list_widget_configurations</code><span>Compose widgets, change templates, reorder.</span></li>
+              <li><code>export_selector_pack</code><span>Serialize a tracker for sharing.</span></li>
+            </ul>
+            <p class="mcp-note">The app never spawns AI binaries. Agent involvement always runs in your own agent's session, with your own API keys.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────── PRINCIPLES ───────────── -->
+      <section class="section section-principles">
+        <div class="section-head">
+          <p class="kicker">07 · PRINCIPLES</p>
+          <h2>What the app refuses to do.</h2>
+        </div>
+        <div class="principles">
+          <div class="principle">
+            <h3>No third-party server.</h3>
+            <p>Cookies, sessions, and scraped values stay on your Mac. The app's only network calls are the ones <em>you</em> point it at.</p>
+          </div>
+          <div class="principle">
+            <h3>No AI binaries bundled.</h3>
+            <p>Agent involvement is always opt-in via MCP, in your client. The app doesn't ship Codex, Claude, or any other model.</p>
+          </div>
+          <div class="principle">
+            <h3>No vendor lock-in.</h3>
+            <p>There is no curated "Codex template", "Claude template", "AWS template". You point a tracker at any URL with a value. The 12 templates are about <em>shape</em>, not content.</p>
+          </div>
+          <div class="principle">
+            <h3>No fake refresh budget.</h3>
+            <p>macOS WidgetKit has no daily reload cap (it's iOS-only). The app refreshes the widget whenever a meaningful new reading lands — not on an arbitrary throttle.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────── FOOTER ───────────── -->
+      <footer class="footer">
+        <div class="footer-inner">
+          <div class="footer-left">
+            <a class="brand brand-footer" href="#top">
+              <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+                <rect x="2" y="2" width="60" height="60" rx="14" fill="#11161c" stroke="rgba(255,255,255,0.08)" stroke-width="1.2"/>
+                <rect x="9" y="9" width="22" height="22" rx="5" fill="#7eecaf"/>
+                <rect x="33" y="9" width="22" height="22" rx="5" fill="rgba(255,255,255,0.07)"/>
+                <rect x="9" y="33" width="22" height="22" rx="5" fill="rgba(255,255,255,0.07)"/>
+                <rect x="33" y="33" width="22" height="22" rx="5" fill="#ffe27a"/>
+              </svg>
+              <span class="brand-words">
+                <span class="brand-name">macOS Stats Widget</span>
+                <span class="brand-sub">Native macOS · MIT licensed</span>
+              </span>
+            </a>
+            <p class="footer-by">By <a href="https://github.com/EthanSK" rel="noopener">Ethan Sarif-Kattan</a> · 2026</p>
+          </div>
+
+          <div class="footer-cols">
+            <div>
+              <h4>Project</h4>
+              <ul>
+                <li><a href="https://github.com/EthanSK/macos-stats-widget" rel="noopener">Source</a></li>
+                <li><a href="https://github.com/EthanSK/macos-stats-widget/blob/main/PLAN.md" rel="noopener">Architecture (PLAN.md)</a></li>
+                <li><a href="https://github.com/EthanSK/macos-stats-widget/issues" rel="noopener">Issues</a></li>
+                <li><a href="https://github.com/EthanSK/macos-stats-widget/releases" rel="noopener">Releases</a></li>
+              </ul>
+            </div>
+            <div>
+              <h4>Lineage</h4>
+              <ul class="footer-lineage">
+                <li><a href="https://github.com/steipete/CodexBar" rel="noopener">CodexBar</a></li>
+                <li><a href="https://meterbar.app/" rel="noopener">MeterBar</a></li>
+                <li><a href="https://bjango.com/mac/istatmenus/" rel="noopener">iStat Menus</a></li>
+                <li><a href="https://github.com/mm7894215/TokenTracker" rel="noopener">TokenTracker</a></li>
+                <li><a href="https://support.apple.com/guide/mac-help/add-and-customize-widgets-mchl52be5da5/mac" rel="noopener">Apple · Stocks · Calendar · Battery · Weather</a></li>
+              </ul>
+            </div>
+            <div>
+              <h4>Author</h4>
+              <ul>
+                <li><a href="https://github.com/EthanSK" rel="noopener">@EthanSK</a></li>
+                <li><a href="https://github.com/EthanSK/producer-player" rel="noopener">Producer Player</a></li>
+                <li><a href="https://ethansk.github.io/producer-player/" rel="noopener">producer-player.app</a></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer-bottom">
+          <span>© 2026 Ethan Sarif-Kattan · MIT License</span>
+          <span class="footer-disclaimer">Not affiliated with OpenAI, Anthropic, AWS, or any other vendor. macOS Stats Widget is a user tool that reads pages you can already see.</span>
+        </div>
+      </footer>
+    </main>
+  </body>
+</html>
