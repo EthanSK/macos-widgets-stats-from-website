@@ -832,30 +832,12 @@ private enum MCPToolDispatcher {
             throw MCPError.notFound("Tracker \(id.uuidString) was not found.")
         }
 
-        return selectorPackPayload(for: tracker)
+        return try SelectorPack(tracker: tracker).jsonObject()
     }
 
     private static func importSelectorPack(_ arguments: [String: Any]) throws -> Any {
         let pack = try selectorPackArgument(arguments["json"])
-        let url = try validatedURL(from: try require(pack["url"] as? String, "Selector pack URL is required."))
-        let name = (pack["name"] as? String)?.nilIfEmpty ?? (pack["label"] as? String)?.nilIfEmpty ?? "Imported Tracker"
-        let mode = renderModeArgument(pack["mode"]) ?? .text
-        let selector = try require(pack["selector"] as? String, "Selector pack selector is required.")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !selector.isEmpty else {
-            throw MCPError.validation("Selector pack selector cannot be empty.")
-        }
-
-        let tracker = Tracker(
-            name: name,
-            url: url.absoluteString,
-            renderMode: mode,
-            selector: selector,
-            elementBoundingBox: elementBoundingBox(from: pack["cropRegion"]),
-            label: pack["label"] as? String,
-            icon: (pack["icon"] as? String)?.nilIfEmpty ?? Tracker.defaultIcon,
-            hideElements: stringArray(from: pack["hideElements"]) ?? []
-        )
+        let tracker = try pack.makeTracker()
 
         try AppGroupStore.mutateSharedConfiguration { configuration in
             configuration.trackers.append(tracker)
@@ -978,20 +960,6 @@ private enum MCPToolDispatcher {
         ]
     }
 
-    private static func selectorPackPayload(for tracker: Tracker) -> [String: Any] {
-        [
-            "schemaVersion": 1,
-            "name": tracker.name,
-            "url": tracker.url,
-            "mode": tracker.renderMode.rawValue,
-            "selector": tracker.selector,
-            "cropRegion": tracker.elementBoundingBox.map(boundingBoxPayload) as Any? ?? NSNull(),
-            "label": tracker.label as Any? ?? NSNull(),
-            "icon": tracker.icon,
-            "hideElements": tracker.hideElements
-        ]
-    }
-
     private static func boundingBoxPayload(_ box: ElementBoundingBox) -> [String: Any] {
         [
             "x": box.x,
@@ -1004,49 +972,15 @@ private enum MCPToolDispatcher {
         ]
     }
 
-    private static func selectorPackArgument(_ value: Any?) throws -> [String: Any] {
-        let pack: [String: Any]
+    private static func selectorPackArgument(_ value: Any?) throws -> SelectorPack {
         if let dictionary = value as? [String: Any] {
-            pack = dictionary
+            return try SelectorPack.decodeStrict(from: dictionary)
         } else if let string = value as? String,
-                  let data = string.data(using: .utf8),
-                  let dictionary = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            pack = dictionary
+                  let data = string.data(using: .utf8) {
+            return try SelectorPack.decodeStrict(from: data)
         } else {
             throw MCPError.invalidParams("json must be a selector pack object or JSON string.")
         }
-
-        guard (pack["schemaVersion"] as? Int) == 1 else {
-            throw MCPError.validation("Unsupported selector pack schemaVersion.")
-        }
-
-        let bannedKeys = ["script", "scripts", "javascript", "userScript", "userScripts"]
-        let lowercasedKeys = Set(pack.keys.map { $0.lowercased() })
-        guard bannedKeys.allSatisfy({ !lowercasedKeys.contains($0.lowercased()) }) else {
-            throw MCPError.validation("Selector packs cannot contain script-like fields.")
-        }
-
-        return pack
-    }
-
-    private static func elementBoundingBox(from value: Any?) -> ElementBoundingBox? {
-        guard let dictionary = value as? [String: Any],
-              let x = doubleValue(dictionary["x"]),
-              let y = doubleValue(dictionary["y"]),
-              let width = doubleValue(dictionary["width"]),
-              let height = doubleValue(dictionary["height"]) else {
-            return nil
-        }
-
-        return ElementBoundingBox(
-            x: x,
-            y: y,
-            width: width,
-            height: height,
-            viewportWidth: doubleValue(dictionary["viewportWidth"]) ?? 0,
-            viewportHeight: doubleValue(dictionary["viewportHeight"]) ?? 0,
-            devicePixelRatio: doubleValue(dictionary["devicePixelRatio"]) ?? 1
-        )
     }
 
     private static func urlArgument(_ key: String, _ arguments: [String: Any]) throws -> URL {

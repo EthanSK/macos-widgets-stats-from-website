@@ -50,9 +50,25 @@ targets:
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: MacosStatsWidget Selector Pack
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSItemContentTypes:
+              - com.ethansk.macos-stats-widget.selectorpack
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSPrincipalClass: NSApplication
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.ethansk.macos-stats-widget.selectorpack
+            UTTypeDescription: MacosStatsWidget Selector Pack
+            UTTypeConformsTo:
+              - public.json
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - selectorpack
+              public.mime-type:
+                - application/vnd.macos-stats-widget.selectorpack+json
     entitlements:
       path: MacosStatsWidget/Apps/MainApp/MacosStatsWidget.entitlements
       properties:

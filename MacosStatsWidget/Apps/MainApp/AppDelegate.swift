@@ -19,6 +19,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         MCPServer.shared.stopSocketServer()
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.pathExtension.lowercased() == SelectorPack.fileExtension {
+            do {
+                _ = try SelectorPackImportCoordinator.importSelectorPack(at: url)
+            } catch {
+                MCPInvocationLoggerProxy.logImportFailure(error)
+            }
+        }
+    }
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
@@ -31,5 +41,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         completionHandler()
+    }
+}
+
+private enum MCPInvocationLoggerProxy {
+    static func logImportFailure(_ error: Error) {
+        let directory = FileManager.default
+            .urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Logs/macOS Stats Widget", isDirectory: true)
+        let url = directory.appendingPathComponent("selector-pack-import.log", isDirectory: false)
+        let line = "\(ISO8601DateFormatter().string(from: Date())) \(error.localizedDescription)\n"
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+            if FileManager.default.fileExists(atPath: url.path) {
+                let handle = try FileHandle(forWritingTo: url)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: Data(line.utf8))
+                try handle.close()
+            } else {
+                try Data(line.utf8).write(to: url, options: .atomic)
+            }
+        } catch {}
     }
 }

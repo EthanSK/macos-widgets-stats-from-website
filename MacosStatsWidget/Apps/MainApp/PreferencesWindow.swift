@@ -7,11 +7,14 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PreferencesWindow: View {
     @EnvironmentObject private var store: AppGroupStore
     @State private var selection: PreferencesSection? = .trackers
     @State private var mcpIdentifyPresentation: MCPIdentifyPresentation?
+    @State private var isSelectorPackDropTargeted = false
+    @State private var selectorPackImportMessage: String?
 
     var body: some View {
         NavigationSplitView {
@@ -36,6 +39,27 @@ struct PreferencesWindow: View {
             }
         }
         .frame(minWidth: 780, minHeight: 520)
+        .onDrop(
+            of: [SelectorPack.contentTypeIdentifier, UTType.fileURL.identifier, UTType.json.identifier],
+            isTargeted: $isSelectorPackDropTargeted,
+            perform: importDroppedSelectorPacks
+        )
+        .overlay(alignment: .bottomTrailing) {
+            if isSelectorPackDropTargeted {
+                Label("Import selector pack", systemImage: "square.and.arrow.down")
+                    .padding(10)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .padding()
+            } else if let selectorPackImportMessage {
+                Text(selectorPackImportMessage)
+                    .font(.caption)
+                    .padding(10)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .padding()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: AppNavigationEvents.openTrackerSettingsNotification)) { _ in
             selection = .trackers
         }
@@ -47,6 +71,86 @@ struct PreferencesWindow: View {
                 completeMCPIdentifyRequest(presentation, pick: pick)
             }
             .frame(width: 1100, height: 760)
+        }
+    }
+
+    private func importDroppedSelectorPacks(_ providers: [NSItemProvider]) -> Bool {
+        var handled = false
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                handled = true
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+                    if let error {
+                        showSelectorPackImportResult(error.localizedDescription)
+                        return
+                    }
+
+                    if let data = item as? Data,
+                       let url = URL(dataRepresentation: data, relativeTo: nil) {
+                        importSelectorPack(url)
+                    } else if let url = item as? URL {
+                        importSelectorPack(url)
+                    }
+                }
+            } else if provider.hasItemConformingToTypeIdentifier(SelectorPack.contentTypeIdentifier) || provider.hasItemConformingToTypeIdentifier(UTType.json.identifier) {
+                handled = true
+                let type = provider.hasItemConformingToTypeIdentifier(SelectorPack.contentTypeIdentifier)
+                    ? SelectorPack.contentTypeIdentifier
+                    : UTType.json.identifier
+                provider.loadDataRepresentation(forTypeIdentifier: type) { data, error in
+                    if let error {
+                        showSelectorPackImportResult(error.localizedDescription)
+                        return
+                    }
+                    guard let data else {
+                        showSelectorPackImportResult("Dropped selector pack was empty.")
+                        return
+                    }
+                    importSelectorPack(data)
+                }
+            }
+        }
+        return handled
+    }
+
+    private func importSelectorPack(_ url: URL) {
+        do {
+            let tracker = try SelectorPackImportCoordinator.importSelectorPack(at: url)
+            DispatchQueue.main.async {
+                store.reloadFromDisk()
+                selection = .trackers
+                showSelectorPackImportResult("Imported \(tracker.name).")
+            }
+        } catch {
+            showSelectorPackImportResult(error.localizedDescription)
+        }
+    }
+
+    private func importSelectorPack(_ data: Data) {
+        do {
+            let pack = try SelectorPack.decodeStrict(from: data)
+            let tracker = try pack.makeTracker()
+            try AppGroupStore.mutateSharedConfiguration { configuration in
+                configuration.trackers.append(tracker)
+            }
+            DispatchQueue.main.async {
+                store.reloadFromDisk()
+                selection = .trackers
+                showSelectorPackImportResult("Imported \(tracker.name).")
+            }
+        } catch {
+            showSelectorPackImportResult(error.localizedDescription)
+        }
+    }
+
+    private func showSelectorPackImportResult(_ message: String) {
+        DispatchQueue.main.async {
+            selectorPackImportMessage = message
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                if selectorPackImportMessage == message {
+                    selectorPackImportMessage = nil
+                }
+            }
         }
     }
 

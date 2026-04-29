@@ -5,13 +5,16 @@
 //  List of configured trackers.
 //
 
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct TrackersListView: View {
     @EnvironmentObject private var store: AppGroupStore
     @EnvironmentObject private var backgroundScheduler: BackgroundScheduler
     @State private var selectedTrackerID: UUID?
     @State private var editorPresentation: TrackerEditorPresentation?
+    @State private var selectorPackExportMessage: String?
 
     var body: some View {
         ZStack {
@@ -35,6 +38,9 @@ struct TrackersListView: View {
                                 }
                                 Button("Duplicate") {
                                     store.duplicateTracker(tracker)
+                                }
+                                Button("Export Selector Pack") {
+                                    exportSelectorPack(tracker)
                                 }
                                 Divider()
                                 Button("Delete", role: .destructive) {
@@ -71,6 +77,14 @@ struct TrackersListView: View {
                 }
                 .disabled(selectedTracker == nil)
                 .help("Scrape Now")
+
+                Button {
+                    exportSelectedSelectorPack()
+                } label: {
+                    Label("Export Selector Pack", systemImage: "square.and.arrow.up")
+                }
+                .disabled(selectedTracker == nil)
+                .help("Export Selector Pack")
             }
         }
         .sheet(item: $editorPresentation) { presentation in
@@ -103,12 +117,19 @@ struct TrackersListView: View {
             openTrackerSettings(trackerID: trackerID)
         }
         .overlay(alignment: .bottomLeading) {
-            if let error = store.lastPersistenceError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .padding(10)
+            VStack(alignment: .leading, spacing: 6) {
+                if let error = store.lastPersistenceError {
+                    Text(error)
+                        .foregroundStyle(.red)
+                }
+                if let selectorPackExportMessage {
+                    Text(selectorPackExportMessage)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .font(.caption)
+            .padding(10)
+            .opacity(store.lastPersistenceError == nil && selectorPackExportMessage == nil ? 0 : 1)
         }
     }
 
@@ -138,6 +159,54 @@ struct TrackersListView: View {
         }
 
         backgroundScheduler.triggerScrapeNow(trackerID: selectedTrackerID)
+    }
+
+    private func exportSelectedSelectorPack() {
+        guard let selectedTracker else {
+            return
+        }
+
+        exportSelectorPack(selectedTracker)
+    }
+
+    private func exportSelectorPack(_ tracker: Tracker) {
+        do {
+            let data = try SelectorPack(tracker: tracker).encodedData()
+            let panel = NSSavePanel()
+            panel.canCreateDirectories = true
+            panel.isExtensionHidden = false
+            panel.nameFieldStringValue = "\(safeFileName(tracker.name.isEmpty ? "selector-pack" : tracker.name)).\(SelectorPack.fileExtension)"
+            if let selectorPackType = UTType(SelectorPack.contentTypeIdentifier) ?? UTType(filenameExtension: SelectorPack.fileExtension) {
+                panel.allowedContentTypes = [selectorPackType]
+            }
+
+            guard panel.runModal() == .OK, let url = panel.url else {
+                return
+            }
+
+            try data.write(to: url, options: .atomic)
+            showExportMessage("Exported \(url.lastPathComponent).")
+        } catch {
+            showExportMessage(error.localizedDescription)
+        }
+    }
+
+    private func safeFileName(_ name: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/\\:?%*|\"<>")
+        let cleaned = name
+            .components(separatedBy: invalid)
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "selector-pack" : cleaned
+    }
+
+    private func showExportMessage(_ message: String) {
+        selectorPackExportMessage = message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            if selectorPackExportMessage == message {
+                selectorPackExportMessage = nil
+            }
+        }
     }
 
     private func edit(_ tracker: Tracker) {
