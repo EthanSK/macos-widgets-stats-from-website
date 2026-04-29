@@ -1,0 +1,158 @@
+name: MacosStatsWidget
+
+options:
+  minimumXcodeGenVersion: 2.39.0
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "13.0"
+
+settings:
+  base:
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGNING_ALLOWED: YES
+    CODE_SIGNING_REQUIRED: NO
+  configs:
+    debug:
+      CODE_SIGNING_ALLOWED: NO
+
+targets:
+  MacosStatsWidget:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    productName: MacosStatsWidget
+    sources:
+      - path: MacosStatsWidget/Apps/MainApp
+      - path: MacosStatsWidget/Shared
+    dependencies:
+      - target: MacosStatsWidgetWidget
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-stats-widget
+        INFOPLIST_FILE: MacosStatsWidget/Apps/MainApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MacosStatsWidget/Apps/MainApp/MacosStatsWidget.entitlements
+    info:
+      path: MacosStatsWidget/Apps/MainApp/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleDisplayName: MacosStatsWidget
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSApplicationCategoryType: public.app-category.utilities
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSPrincipalClass: NSApplication
+    entitlements:
+      path: MacosStatsWidget/Apps/MainApp/MacosStatsWidget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.application-groups:
+          - group.com.ethansk.macos-stats-widget
+
+  MacosStatsWidgetWidget:
+    type: app-extension
+    platform: macOS
+    deploymentTarget: "13.0"
+    productName: MacosStatsWidgetWidget
+    sources:
+      - path: MacosStatsWidget/Apps/WidgetExtension
+      - path: MacosStatsWidget/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-stats-widget.widget
+        INFOPLIST_FILE: MacosStatsWidget/Apps/WidgetExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MacosStatsWidget/Apps/WidgetExtension/MacosStatsWidgetWidget.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+    info:
+      path: MacosStatsWidget/Apps/WidgetExtension/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleDisplayName: MacosStatsWidgetWidget
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: MacosStatsWidget/Apps/WidgetExtension/MacosStatsWidgetWidget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.application-groups:
+          - group.com.ethansk.macos-stats-widget
+
+  MacosStatsWidgetCLI:
+    type: tool
+    platform: macOS
+    deploymentTarget: "13.0"
+    productName: macos-stats-widget
+    sources:
+      - path: MacosStatsWidget/Apps/CLI
+      - path: MacosStatsWidget/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-stats-widget.cli
+        INFOPLIST_FILE: MacosStatsWidget/Apps/CLI/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MacosStatsWidget/Apps/CLI/MacosStatsWidgetCLI.entitlements
+    info:
+      path: MacosStatsWidget/Apps/CLI/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+    entitlements:
+      path: MacosStatsWidget/Apps/CLI/MacosStatsWidgetCLI.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+
+schemes:
+  MacosStatsWidget:
+    build:
+      targets:
+        MacosStatsWidget: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  MacosStatsWidgetWidget:
+    build:
+      targets:
+        MacosStatsWidgetWidget: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  MacosStatsWidgetCLI:
+    build:
+      targets:
+        MacosStatsWidgetCLI: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -86,6 +86,16 @@ the tool catalog.
 
 [MIT](LICENSE) — copyright Ethan Sarif-Kattan, 2026.
 
+## Build (v0.1)
+
+```bash
+brew install xcodegen
+xcodegen
+open MacosStatsWidget.xcodeproj
+# or for headless build:
+xcodebuild -project MacosStatsWidget.xcodeproj -scheme MacosStatsWidget -configuration Debug build
+```
+
 ## Acknowledgments
 
 - **[CodexBar](https://github.com/steipete/CodexBar)**, **[MeterBar](https://meterbar.app/)**,
