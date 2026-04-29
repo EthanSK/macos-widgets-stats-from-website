@@ -999,13 +999,13 @@ ballooning the App Group file size.
 ### 12.5 First-run experience
 *Question:* Empty-state CTA, or silent default scrape?
 *Resolution:* **Layered.** Widget empty-state CTA (deep-links into main app)
-+ first-launch flow with sign-in → Identify Element → first widget. **No
-silent default scrape.** Pre-filled URL templates (Codex
-`platform.openai.com/usage`, Claude
-`console.anthropic.com/settings/usage`) are offered as sign-in starters.
-*Reason:* Privacy-respecting, user-in-control, with the fast path so the
-first tracker takes <60 s. Silent scrape is the dark-pattern surface we want
-to avoid.
++ first-launch flow with custom URL → render/config choice → Identify Element
+→ explicit Save Tracker → first widget. **No silent default scrape and no
+AI-spend-specific starter defaults.** The first setup path always starts from
+a URL the user enters.
+*Reason:* Privacy-respecting, user-in-control, with a generic fast path so the
+first tracker takes <60 s without implying the product is only for LLM spend.
+Silent scrape is the dark-pattern surface we want to avoid.
 
 ### 12.6 App Store + Homebrew
 *Question:* Is App Store-only acceptable without the CLI?
@@ -1126,8 +1126,9 @@ the same intent without us shipping a chat client.
 *Requirement (canonical state):* The first-launch flow must not auto-detect
 or recommend installing AI CLIs. The product works fully without any
 external CLI; agents that want to talk to it connect via MCP separately.
-*Resolution:* §14 specifies a three-step flow: sign-in → Identify Element →
-first widget. The previously-planned "Detect AI CLIs" step is deleted.
+*Resolution:* §14 specifies a three-step flow: custom URL → render/config +
+Identify Element → first widget. The previously-planned "Detect AI CLIs" step
+is deleted.
 *Reason:* Detecting `codex` / `claude` would couple the app to a specific
 agent ecosystem, suggest the app *needs* one, and leak the user's installed
 agents into our preferences file. The MCP server is opt-in plumbing, not a
@@ -1285,35 +1286,35 @@ Three steps, on first app launch. Each is skippable; skipping degrades the
 experience but never blocks the install. **There is no CLI-detection step**
 — the app does not know or care which AI CLIs the user has installed.
 
-### Step 1 — Sign in to first tracked site
+### Step 1 — Enter the first URL
 
 ```
-┌─ Sign in ──────────────────────────────────────────────────────┐
-│  Pick a starter template or pick your own URL:                  │
+┌─ Start with any website ───────────────────────────────────────┐
+│  Paste the page you want to track:                              │
 │                                                                 │
-│   [ Codex usage          (platform.openai.com/usage)        ]   │
-│   [ Claude Code spend    (console.anthropic.com/settings/…) ]   │
-│   [ Custom URL …                                            ]   │
+│   [ https://example.com/dashboard                         ]     │
 │                                                                 │
-│  The in-app browser will open. Sign in with your usual method   │
-│  (Google, passkey, email/password — we use the standard         │
-│  WebKit profile so SSO just works).                             │
+│  You can sign in and move around inside the in-app browser      │
+│  before choosing the exact value or region.                     │
 │                                                                 │
-│              [ Skip ]              [ Open browser ]              │
+│              [ Skip ]                         [ Continue ]       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Picking a starter pre-fills the URL but the user still signs in themselves.
+There are no Codex / Claude / AI-spend starters in the first-run path. The
+user enters any http/https URL (scheme may be omitted for normal domains).
 We never store credentials; cookies persist via
 `WKWebsiteDataStore(forIdentifier: "macos-widgets-stats-from-website")`. Passkey flows
 route through `ASWebAuthenticationSession`.
 
-### Step 2 — Identify Element
+### Step 2 — Configure and Identify Element
 
 The standard capture flow from §6, walked through with inline guidance:
-"Hover the value you want to track. Click to select. We'll preview the
-result on the next screen." User picks render mode (Text / Snapshot), names
-the tracker, sets SF Symbol + accent. Save commits to `trackers.json`.
+"In the browser, sign in if needed, click Identify Element, hover the value
+or region, then click to preview and use it." User names the tracker, picks
+render mode (Text / Snapshot), picks the first widget template, sets SF
+Symbol + accent, captures the element, then explicitly clicks **Save Tracker**
+to commit to `trackers.json`.
 
 ### Step 3 — Add a widget
 
@@ -1321,21 +1322,21 @@ the tracker, sets SF Symbol + accent. Save commits to `trackers.json`.
 ┌─ Drop a widget on your desktop ────────────────────────────────┐
 │  We just made your first widget configuration:                  │
 │                                                                 │
-│   "Codex Only" — Single Big Number — Small                      │
+│   "example.com Tracker Widget" — Single Big Number — Small      │
 │                                                                 │
 │  How to add it:                                                 │
 │   1. Right-click the desktop ➜ Edit Widgets                     │
-│   2. Search "macOS Widgets Stats from Website"                                │
-│   3. Drag the small one onto your desktop                       │
-│   4. Pick "Codex Only" from the configuration picker            │
+│   2. Search "macOS Widgets Stats from Website"                  │
+│   3. Drag the matching size onto your desktop                   │
+│   4. Pick the new configuration from the configuration picker   │
 │                                                                 │
 │              [ I'll do this later ]    [ Done ]                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-The default configuration is built from the **Single Big Number** template
-(§9.3 #1) bound to the tracker the user just added. The flow ends. Re-open
-any time from Help → "Show First-Launch Flow".
+The first configuration is built from the template the user chose in Step 2
+and bound to the tracker they just saved. The flow ends. Re-open any time
+from Help → "Show First-Launch Flow".
 
 ## 15. Pre-implementation TODO
 

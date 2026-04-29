@@ -83,14 +83,15 @@ shape and migration strategy.
 ## Setup walkthrough
 
 1. Open **macOS Widgets Stats from Website.app**.
-2. On first launch, sign in to the first site in the in-app browser, or skip
-   the wizard and open Preferences directly.
-3. Click **Identify Element**, hover the value on the page until it lights up,
-   click to capture.
-4. Pick **Text** or **Snapshot** mode, set a refresh interval, save.
-5. Add or edit widget configurations in Preferences, choosing a WidgetKit size
-   and one of the 12 templates.
-6. Add the widget to your desktop or notification centre and select the desired
+2. On first launch, paste any page URL and click **Continue**, or skip the
+   wizard and open Preferences directly.
+3. Pick **Text** or **Snapshot** mode, choose the first widget template, then
+   open the page in the in-app browser.
+4. Sign in or navigate if needed, click **Identify Element**, hover the value or
+   page region until it lights up, then click to capture and preview it.
+5. Click **Save Tracker** to create the tracker and its first widget
+   configuration.
+6. Add the widget to your desktop or notification centre and select the new
    configuration.
 
 ## Wiring up an AI agent (optional)

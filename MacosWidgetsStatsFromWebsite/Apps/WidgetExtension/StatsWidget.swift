@@ -46,16 +46,16 @@ struct StatsWidgetProvider: IntentTimelineProvider {
         StatsWidgetEntry(
             date: Date(),
             configuration: WidgetConfiguration(
-                name: "Codex Only",
+                name: "Example Stat",
                 templateID: .singleBigNumber,
                 trackerIDs: []
             ),
             trackers: [
                 Tracker(
-                    name: "Codex",
-                    url: "https://platform.openai.com/usage",
+                    name: "Example Stat",
+                    url: "https://example.com/dashboard",
                     selector: "body",
-                    label: "Codex",
+                    label: "Demo",
                     accentColorHex: Tracker.defaultAccentColorHex
                 )
             ],

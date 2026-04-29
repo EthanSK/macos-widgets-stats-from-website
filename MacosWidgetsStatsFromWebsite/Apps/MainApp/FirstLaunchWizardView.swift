@@ -2,7 +2,7 @@
 //  FirstLaunchWizardView.swift
 //  MacosWidgetsStatsFromWebsite
 //
-//  Skippable first-launch setup: sign in, identify an element, create first widget.
+//  Skippable first-launch setup: enter a URL, identify an element, create first widget.
 //
 
 import SwiftUI
@@ -11,17 +11,17 @@ struct FirstLaunchWizardView: View {
     @EnvironmentObject private var store: AppGroupStore
     @Binding var isPresented: Bool
 
-    @State private var step: Step = .signIn
-    @State private var starter: Starter = .codexUsage
+    @State private var step: Step = .url
     @State private var customURL = ""
-    @State private var signInBrowser: BrowserPresentation?
+    @State private var selectedURL: URL?
     @State private var identifyBrowser: BrowserPresentation?
-    @State private var didOpenSignInBrowser = false
 
-    @State private var trackerName = "First Tracker"
+    @State private var trackerName = ""
     @State private var renderMode: RenderMode = .text
+    @State private var widgetTemplate: WidgetTemplate = .singleBigNumber
     @State private var icon = Tracker.defaultIcon
     @State private var accentColor = Color(hexString: Tracker.defaultAccentColorHex) ?? .accentColor
+    @State private var capturedPick: ElementPick?
     @State private var createdTracker: Tracker?
     @State private var createdWidgetConfiguration: WidgetConfiguration?
     @State private var errorMessage: String?
@@ -31,28 +31,20 @@ struct FirstLaunchWizardView: View {
             header
 
             switch step {
-            case .signIn:
-                signInStep
-            case .identify:
-                identifyStep
+            case .url:
+                urlStep
+            case .capture:
+                captureStep
             case .widget:
                 widgetStep
             }
         }
         .padding(28)
-        .frame(width: 620)
-        .frame(minHeight: 430)
-        .sheet(item: $signInBrowser, onDismiss: {
-            if didOpenSignInBrowser {
-                step = .identify
-            }
-        }) { presentation in
-            InAppBrowserView(initialURL: presentation.url, allowsElementIdentification: false)
-                .frame(width: 1100, height: 760)
-        }
+        .frame(width: 640)
+        .frame(minHeight: 470)
         .sheet(item: $identifyBrowser) { presentation in
             InAppBrowserView(initialURL: presentation.url, renderMode: renderMode, allowsElementIdentification: true) { pick in
-                createFirstTracker(from: pick, url: presentation.url)
+                applyCapturedElement(pick)
             }
             .frame(width: 1100, height: 760)
         }
@@ -67,33 +59,36 @@ struct FirstLaunchWizardView: View {
         }
     }
 
-    private var signInStep: some View {
+    private var urlStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Picker("First tracked site", selection: $starter) {
-                ForEach(Starter.allCases) { starter in
-                    Text(starter.title).tag(starter)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Start with any website")
+                    .font(.headline)
+                Text("Paste the page you want to track. You can sign in and move around inside the browser before choosing the exact value or region.")
+                    .foregroundStyle(.secondary)
             }
 
-            if starter == .custom {
-                TextField("https://example.com", text: $customURL)
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("https://example.com/dashboard", text: $customURL)
                     .textFieldStyle(.roundedBorder)
-            } else {
-                LabeledContent("URL") {
-                    Text(starter.urlString)
-                        .textSelection(.enabled)
+                    .onSubmit {
+                        continueWithURL()
+                    }
+
+                if let urlValidationMessage {
+                    Text(urlValidationMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else {
+                    Text("Examples: a usage dashboard, bank balance, weather page, status page, or any page with a value you care about.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            Text("The in-app browser uses the shared macos-widgets-stats-from-website WebKit profile for cookies and sign-in state.")
+            Text("Cookies stay in the app's shared macos-widgets-stats-from-website WebKit profile. Nothing is sent to a third-party server.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
 
             Spacer(minLength: 16)
 
@@ -102,19 +97,27 @@ struct FirstLaunchWizardView: View {
                     skip()
                 }
                 Spacer()
-                Button("Open browser") {
-                    openSignInBrowser()
+                Button("Continue") {
+                    continueWithURL()
                 }
+                .disabled(validatedCustomURL == nil)
                 .keyboardShortcut(.defaultAction)
             }
         }
     }
 
-    private var identifyStep: some View {
+    private var captureStep: some View {
         VStack(alignment: .leading, spacing: 16) {
             Form {
                 Section {
-                    TextField("Name", text: $trackerName)
+                    LabeledContent("URL") {
+                        Text(selectedURL?.absoluteString ?? "No URL selected")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                    TextField("Tracker name", text: $trackerName)
+
                     Picker("Render mode", selection: $renderMode) {
                         ForEach(RenderMode.allCases) { mode in
                             Text(mode.displayName).tag(mode)
@@ -122,6 +125,20 @@ struct FirstLaunchWizardView: View {
                     }
                     .pickerStyle(.segmented)
 
+                    Picker("First widget", selection: $widgetTemplate) {
+                        ForEach(availableWidgetTemplates, id: \.rawValue) { template in
+                            Text(template.displayName).tag(template)
+                        }
+                    }
+
+                    Text(widgetTemplateHelp)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Tracker")
+                }
+
+                Section {
                     HStack {
                         TextField("SF Symbol", text: $icon)
                         Image(systemName: icon.isEmpty ? Tracker.defaultIcon : icon)
@@ -129,13 +146,55 @@ struct FirstLaunchWizardView: View {
                     }
 
                     ColorPicker("Accent color", selection: $accentColor, supportsOpacity: false)
+                } header: {
+                    Text("Presentation")
+                }
+
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            openIdentifyBrowser()
+                        } label: {
+                            Label(capturedPick == nil ? "Open Page and Identify Element" : "Re-identify Element", systemImage: "viewfinder")
+                        }
+                        .disabled(selectedURL == nil)
+
+                        if let capturedPick {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Captured selector")
+                                    .font(.caption.weight(.semibold))
+                                Text(capturedPick.selector)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .lineLimit(2)
+                                    .textSelection(.enabled)
+
+                                Text(capturedPick.text.isEmpty ? "No text captured; snapshot mode can still use the selected region." : capturedPick.text)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                                    .textSelection(.enabled)
+
+                                Text("Bounds: \(formattedBoundingBox(capturedPick.bbox))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 4)
+                        } else {
+                            Text("In the browser, sign in if needed, click Identify Element, hover the value or region, then click to preview and use it.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Capture")
                 }
             }
             .formStyle(.grouped)
-
-            Text("Hover the value you want to track, click to select it, then confirm the preview.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            .onChange(of: renderMode) { newMode in
+                if !availableWidgetTemplates(for: newMode).contains(widgetTemplate) {
+                    widgetTemplate = Self.defaultWidgetTemplate(for: newMode)
+                }
+            }
 
             if let errorMessage {
                 Text(errorMessage)
@@ -143,7 +202,7 @@ struct FirstLaunchWizardView: View {
                     .foregroundStyle(.red)
             }
 
-            Spacer(minLength: 16)
+            Spacer(minLength: 12)
 
             HStack {
                 Button("Skip") {
@@ -151,11 +210,13 @@ struct FirstLaunchWizardView: View {
                 }
                 Spacer()
                 Button("Back") {
-                    step = .signIn
+                    errorMessage = nil
+                    step = .url
                 }
-                Button("Identify Element") {
-                    openIdentifyBrowser()
+                Button("Save Tracker") {
+                    saveFirstTracker()
                 }
+                .disabled(!canSaveTracker)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -163,9 +224,17 @@ struct FirstLaunchWizardView: View {
 
     private var widgetStep: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if let createdTracker {
+                LabeledContent("Tracker") {
+                    Text(createdTracker.name)
+                        .textSelection(.enabled)
+                }
+            }
+
             if let createdWidgetConfiguration {
-                LabeledContent("Widget") {
+                LabeledContent("Widget configuration") {
                     Text("\(createdWidgetConfiguration.name) - \(createdWidgetConfiguration.templateID.displayName) - \(createdWidgetConfiguration.size.displayName)")
+                        .textSelection(.enabled)
                 }
             }
 
@@ -174,8 +243,8 @@ struct FirstLaunchWizardView: View {
                     .font(.headline)
                 Text("1. Right-click the desktop and choose Edit Widgets")
                 Text("2. Search for macOS Widgets Stats from Website")
-                Text("3. Drag the small widget onto the desktop")
-                Text("4. Pick the new configuration")
+                Text("3. Drag a \(createdWidgetConfiguration?.size.displayName.lowercased() ?? "small") widget onto the desktop")
+                Text("4. Pick \"\(createdWidgetConfiguration?.name ?? "your new configuration")\" from the configuration picker")
             }
             .foregroundStyle(.secondary)
 
@@ -194,41 +263,63 @@ struct FirstLaunchWizardView: View {
         }
     }
 
-    private var selectedURL: URL? {
-        let urlString = starter == .custom ? customURL : starter.urlString
-        let normalized = urlString.contains("://") ? urlString : "https://\(urlString)"
-        guard let url = URL(string: normalized),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              url.host?.isEmpty == false else {
-            return nil
-        }
-        return url
+    private var trimmedCustomURL: String {
+        customURL.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func openSignInBrowser() {
-        guard let url = selectedURL else {
-            errorMessage = "Enter a valid http or https URL."
+    private var trimmedTrackerName: String {
+        trackerName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var validatedCustomURL: URL? {
+        validatedURL(from: trimmedCustomURL)
+    }
+
+    private var urlValidationMessage: String? {
+        guard !trimmedCustomURL.isEmpty, validatedCustomURL == nil else {
+            return nil
+        }
+
+        return "Enter a valid http or https URL. You can omit https:// for normal domains."
+    }
+
+    private var availableWidgetTemplates: [WidgetTemplate] {
+        availableWidgetTemplates(for: renderMode)
+    }
+
+    private var widgetTemplateHelp: String {
+        "Creates a \(widgetTemplate.size.displayName.lowercased()) \(widgetTemplate.displayName) widget configuration after saving."
+    }
+
+    private var canSaveTracker: Bool {
+        selectedURL != nil && !trimmedTrackerName.isEmpty && capturedPick != nil
+    }
+
+    private func continueWithURL() {
+        guard let url = validatedCustomURL else {
             return
         }
 
+        let previousDefaultName = selectedURL.map(defaultTrackerName(for:))
+        if selectedURL != url {
+            capturedPick = nil
+        }
+
+        selectedURL = url
+        customURL = url.absoluteString
         errorMessage = nil
-        didOpenSignInBrowser = true
-        signInBrowser = BrowserPresentation(url: url)
-        if trackerName == "First Tracker" {
+
+        if trimmedTrackerName.isEmpty || previousDefaultName == trackerName {
             trackerName = defaultTrackerName(for: url)
         }
+
+        step = .capture
     }
 
     private func openIdentifyBrowser() {
         guard let url = selectedURL else {
-            errorMessage = "Enter a valid http or https URL."
-            step = .signIn
-            return
-        }
-
-        guard !trackerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            errorMessage = "Name the tracker before identifying an element."
+            errorMessage = "Enter a URL before identifying an element."
+            step = .url
             return
         }
 
@@ -236,13 +327,34 @@ struct FirstLaunchWizardView: View {
         identifyBrowser = BrowserPresentation(url: url)
     }
 
-    private func createFirstTracker(from pick: ElementPick, url: URL) {
+    private func applyCapturedElement(_ pick: ElementPick) {
+        capturedPick = pick
+        errorMessage = nil
+    }
+
+    private func saveFirstTracker() {
+        guard let url = selectedURL else {
+            errorMessage = "Enter a URL before saving."
+            step = .url
+            return
+        }
+
+        guard !trimmedTrackerName.isEmpty else {
+            errorMessage = "Name the tracker before saving."
+            return
+        }
+
+        guard let capturedPick else {
+            errorMessage = "Identify an element before saving the tracker."
+            return
+        }
+
         var tracker = Tracker(
-            name: trackerName.trimmingCharacters(in: .whitespacesAndNewlines),
+            name: trimmedTrackerName,
             url: url.absoluteString,
             renderMode: renderMode,
-            selector: pick.selector,
-            elementBoundingBox: pick.bbox,
+            selector: capturedPick.selector,
+            elementBoundingBox: capturedPick.bbox,
             label: nil,
             icon: icon.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? Tracker.defaultIcon,
             accentColorHex: accentColor.hexString ?? Tracker.defaultAccentColorHex
@@ -251,14 +363,15 @@ struct FirstLaunchWizardView: View {
 
         let widgetConfiguration = WidgetConfiguration(
             name: "\(tracker.name) Widget",
-            templateID: .singleBigNumber,
-            size: .small,
-            layout: .single,
+            templateID: widgetTemplate,
+            size: widgetTemplate.size,
+            layout: widgetTemplate.defaultLayout,
             trackerIDs: [tracker.id]
         )
 
         store.addTracker(tracker)
         store.addWidgetConfiguration(widgetConfiguration)
+        store.persist()
         createdTracker = tracker
         createdWidgetConfiguration = widgetConfiguration
         step = .widget
@@ -274,63 +387,70 @@ struct FirstLaunchWizardView: View {
         isPresented = false
     }
 
-    private func defaultTrackerName(for url: URL) -> String {
-        switch starter {
-        case .codexUsage:
-            return "Codex Usage"
-        case .claudeSpend:
-            return "Claude Code Spend"
-        case .custom:
-            return url.host ?? "First Tracker"
+    private func validatedURL(from string: String) -> URL? {
+        guard !string.isEmpty else {
+            return nil
         }
+
+        let normalized = string.contains("://") ? string : "https://\(string)"
+        guard let url = URL(string: normalized),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              url.host?.isEmpty == false else {
+            return nil
+        }
+
+        return url
+    }
+
+    private func defaultTrackerName(for url: URL) -> String {
+        guard let host = url.host?.replacingOccurrences(of: "www.", with: ""), !host.isEmpty else {
+            return "Website Tracker"
+        }
+
+        return "\(host) Tracker"
+    }
+
+    private func availableWidgetTemplates(for mode: RenderMode) -> [WidgetTemplate] {
+        switch mode {
+        case .text:
+            return [.singleBigNumber, .numberPlusSparkline, .gaugeRing, .headlineSparkline, .heroPlusDetail]
+        case .snapshot:
+            return [.liveSnapshotTile, .liveSnapshotHero]
+        }
+    }
+
+    private static func defaultWidgetTemplate(for mode: RenderMode) -> WidgetTemplate {
+        switch mode {
+        case .text:
+            return .singleBigNumber
+        case .snapshot:
+            return .liveSnapshotTile
+        }
+    }
+
+    private func formattedBoundingBox(_ bbox: ElementBoundingBox) -> String {
+        let width = Int(round(bbox.width))
+        let height = Int(round(bbox.height))
+        let x = Int(round(bbox.x))
+        let y = Int(round(bbox.y))
+        return "\(width)x\(height) at \(x), \(y)"
     }
 }
 
 private enum Step {
-    case signIn
-    case identify
+    case url
+    case capture
     case widget
 
     var subtitle: String {
         switch self {
-        case .signIn:
-            return "Step 1 of 3: sign in to the first site you want to track."
-        case .identify:
-            return "Step 2 of 3: identify the value or page region."
+        case .url:
+            return "Step 1 of 3: enter the page you want to track."
+        case .capture:
+            return "Step 2 of 3: choose the render mode and capture the value or page region."
         case .widget:
-            return "Step 3 of 3: create the first desktop widget."
-        }
-    }
-}
-
-private enum Starter: String, CaseIterable, Identifiable {
-    case codexUsage
-    case claudeSpend
-    case custom
-
-    var id: String {
-        rawValue
-    }
-
-    var title: String {
-        switch self {
-        case .codexUsage:
-            return "Codex usage"
-        case .claudeSpend:
-            return "Claude Code spend"
-        case .custom:
-            return "Custom URL"
-        }
-    }
-
-    var urlString: String {
-        switch self {
-        case .codexUsage:
-            return "https://platform.openai.com/usage"
-        case .claudeSpend:
-            return "https://console.anthropic.com/settings"
-        case .custom:
-            return ""
+            return "Step 3 of 3: add the first desktop widget."
         }
     }
 }
