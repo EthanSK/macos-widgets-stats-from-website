@@ -119,17 +119,22 @@ final class AppGroupStore: ObservableObject {
                 widgetConfigurations: widgetConfigurations,
                 preferences: preferences
             )
-            try Self.write(configuration: configuration, to: AppGroupPaths.canonicalTrackersURL())
-
-            if let appGroupURL = AppGroupPaths.appGroupTrackersURL() {
-                try Self.write(configuration: configuration, to: appGroupURL)
-            }
+            try Self.save(configuration: configuration)
 
             schemaVersion = currentSchemaVersion
             lastPersistenceError = nil
         } catch {
             lastPersistenceError = error.localizedDescription
         }
+    }
+
+    func reloadFromDisk() {
+        let configuration = Self.loadSharedConfiguration()
+        schemaVersion = configuration.schemaVersion
+        trackers = configuration.trackers
+        widgetConfigurations = configuration.widgetConfigurations
+        preferences = configuration.preferences
+        lastPersistenceError = nil
     }
 
     static func loadReadings() -> TrackerReadingsFile {
@@ -210,6 +215,38 @@ final class AppGroupStore: ObservableObject {
         }
 
         return loadConfiguration(from: url)
+    }
+
+    static func loadSharedConfiguration() -> AppConfiguration {
+        let canonical = loadConfiguration()
+        if !canonical.trackers.isEmpty || !canonical.widgetConfigurations.isEmpty {
+            return canonical
+        }
+
+        let appGroup = loadAppGroupConfiguration()
+        if !appGroup.trackers.isEmpty || !appGroup.widgetConfigurations.isEmpty {
+            return appGroup
+        }
+
+        return canonical
+    }
+
+    static func save(configuration: AppConfiguration) throws {
+        var normalized = configuration
+        normalized.schemaVersion = currentSchemaVersion
+        try write(configuration: normalized, to: AppGroupPaths.canonicalTrackersURL())
+
+        if let appGroupURL = AppGroupPaths.appGroupTrackersURL() {
+            try write(configuration: normalized, to: appGroupURL)
+        }
+    }
+
+    @discardableResult
+    static func mutateSharedConfiguration(_ mutate: (inout AppConfiguration) throws -> Void) throws -> AppConfiguration {
+        var configuration = loadSharedConfiguration()
+        try mutate(&configuration)
+        try save(configuration: configuration)
+        return configuration
     }
 
     private static func loadConfiguration(from url: URL) -> AppConfiguration {

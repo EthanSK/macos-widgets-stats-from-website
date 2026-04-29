@@ -13,6 +13,7 @@ enum AppGroupPaths {
     static let trackersFileName = "trackers.json"
     static let readingsFileName = "readings.json"
     static let auditLogFileName = "audit-log.json"
+    static let mcpSocketFileName = "mcp.sock"
 
     static func sharedContainerURL() -> URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
@@ -37,5 +38,14 @@ enum AppGroupPaths {
 
     static func appGroupAuditLogURL() -> URL? {
         sharedContainerURL()?.appendingPathComponent(auditLogFileName, isDirectory: false)
+    }
+
+    static func mcpApplicationSupportURL() -> URL {
+        let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return baseURL.appendingPathComponent("MacosStatsWidget", isDirectory: true)
+    }
+
+    static func mcpSocketURL() -> URL {
+        mcpApplicationSupportURL().appendingPathComponent(mcpSocketFileName, isDirectory: false)
     }
 }

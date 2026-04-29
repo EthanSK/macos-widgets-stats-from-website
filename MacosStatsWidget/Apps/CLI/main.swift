@@ -2,7 +2,26 @@
 //  main.swift
 //  MacosStatsWidgetCLI
 //
-//  v0.1 stub — see PLAN.md §4 for the full design.
+//  Power-user adjunct and MCP stdio entrypoint.
 //
 
-print("macos-stats-widget CLI v0.1.0; not yet functional")
+import Foundation
+
+let arguments = Array(CommandLine.arguments.dropFirst())
+
+if arguments.contains("--mcp-stdio") || arguments.first == "mcp-stdio" {
+    MCPServer.shared.runStdioServer()
+    exit(0)
+}
+
+if arguments.first == "mcp-token" {
+    if let token = MCPServer.shared.currentToken() {
+        print(token)
+    } else {
+        fputs("No MCP token is available. Launch the app to start the socket server.\n", stderr)
+        exit(1)
+    }
+} else {
+    print("macos-stats-widget CLI v0.9.0")
+    print("Usage: macos-stats-widget mcp-stdio | mcp-token")
+}

@@ -5,10 +5,13 @@
 //  Main preferences container.
 //
 
+import AppKit
 import SwiftUI
 
 struct PreferencesWindow: View {
+    @EnvironmentObject private var store: AppGroupStore
     @State private var selection: PreferencesSection? = .trackers
+    @State private var mcpIdentifyPresentation: MCPIdentifyPresentation?
 
     var body: some View {
         NavigationSplitView {
@@ -36,7 +39,66 @@ struct PreferencesWindow: View {
         .onReceive(NotificationCenter.default.publisher(for: AppNavigationEvents.openTrackerSettingsNotification)) { _ in
             selection = .trackers
         }
+        .onReceive(NotificationCenter.default.publisher(for: .mcpIdentifyElementRequested)) { notification in
+            openMCPIdentifyRequest(notification)
+        }
+        .sheet(item: $mcpIdentifyPresentation) { presentation in
+            InAppBrowserView(initialURL: presentation.url, renderMode: .text, allowsElementIdentification: true) { pick in
+                completeMCPIdentifyRequest(presentation, pick: pick)
+            }
+            .frame(width: 1100, height: 760)
+        }
     }
+
+    private func openMCPIdentifyRequest(_ notification: Notification) {
+        guard let trackerIDString = notification.userInfo?["trackerID"] as? String,
+              let trackerID = UUID(uuidString: trackerIDString),
+              let urlString = notification.userInfo?["url"] as? String,
+              let url = URL(string: urlString) else {
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        store.reloadFromDisk()
+
+        if !store.trackers.contains(where: { $0.id == trackerID }) {
+            store.addTracker(Tracker(id: trackerID, name: "Pending \(url.host ?? "Tracker")", url: url.absoluteString, selector: ""))
+        }
+
+        selection = .browser
+        mcpIdentifyPresentation = MCPIdentifyPresentation(trackerID: trackerID, url: url)
+    }
+
+    private func completeMCPIdentifyRequest(_ presentation: MCPIdentifyPresentation, pick: ElementPick) {
+        store.reloadFromDisk()
+        guard let tracker = store.trackers.first(where: { $0.id == presentation.trackerID }) else {
+            return
+        }
+
+        var updated = tracker
+        if updated.name.hasPrefix("Pending ") {
+            updated.name = presentation.url.host ?? "Tracked Element"
+        }
+        updated.selector = pick.selector
+        updated.elementBoundingBox = pick.bbox
+        updated.url = presentation.url.absoluteString
+        store.updateTracker(updated)
+
+        AuditLog.record(
+            trackerID: updated.id,
+            beforeSelector: nil,
+            afterSelector: pick.selector,
+            outcome: "human_in_loop_identified",
+            source: "mcp"
+        )
+        NotificationCenter.default.post(name: .mcpConfigurationChanged, object: nil)
+    }
+}
+
+private struct MCPIdentifyPresentation: Identifiable {
+    let id = UUID()
+    let trackerID: UUID
+    let url: URL
 }
 
 private enum PreferencesSection: String, CaseIterable, Hashable, Identifiable {

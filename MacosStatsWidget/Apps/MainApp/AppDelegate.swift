@@ -12,6 +12,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         HealNotifier.shared.configure()
+        MCPServer.shared.startSocketServer()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MCPServer.shared.stopSocketServer()
     }
 
     func userNotificationCenter(

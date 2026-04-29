@@ -5,11 +5,13 @@
 //  User-driven self-heal preferences and audit history.
 //
 
+import AppKit
 import SwiftUI
 
 struct SelfHealPrefsView: View {
     @EnvironmentObject private var store: AppGroupStore
     @State private var auditEntries: [AuditLogEntry] = AuditLog.entries()
+    @State private var mcpToken: String?
 
     var body: some View {
         Form {
@@ -82,6 +84,42 @@ struct SelfHealPrefsView: View {
                     .buttonStyle(.borderless)
                     .help("Refresh Audit Log")
                 }
+            }
+
+            Section {
+                LabeledContent("Socket") {
+                    Text(AppGroupPaths.mcpSocketURL().path)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+
+                if let mcpToken {
+                    Text(mcpToken)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                } else {
+                    Text("Token hidden.")
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Button("Reveal token") {
+                        mcpToken = MCPServer.shared.currentToken()
+                    }
+
+                    Button("Copy token") {
+                        let token = mcpToken ?? MCPServer.shared.currentToken()
+                        if let token {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(token, forType: .string)
+                            mcpToken = token
+                        }
+                    }
+                }
+            } header: {
+                Text("MCP")
+            } footer: {
+                Text("Socket clients authenticate with this launch token in X-Auth or initialize params. Stdio MCP does not require a token.")
             }
         }
         .formStyle(.grouped)

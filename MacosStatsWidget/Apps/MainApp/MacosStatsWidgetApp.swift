@@ -5,6 +5,8 @@
 //  App entry and scene wiring.
 //
 
+import Darwin
+import Foundation
 import SwiftUI
 
 @main
@@ -14,6 +16,11 @@ struct MacosStatsWidgetApp: App {
     @StateObject private var backgroundScheduler: BackgroundScheduler
 
     init() {
+        if CommandLine.arguments.contains("--mcp-stdio") {
+            MCPServer.shared.runStdioServer()
+            Darwin.exit(0)
+        }
+
         let store = AppGroupStore()
         _store = StateObject(wrappedValue: store)
         _backgroundScheduler = StateObject(wrappedValue: BackgroundScheduler(store: store))
@@ -28,6 +35,10 @@ struct MacosStatsWidgetApp: App {
                     backgroundScheduler.sync()
                 }
                 .onReceive(store.$trackers) { _ in
+                    backgroundScheduler.sync()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .mcpConfigurationChanged)) { _ in
+                    store.reloadFromDisk()
                     backgroundScheduler.sync()
                 }
         }
