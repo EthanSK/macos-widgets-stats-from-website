@@ -15,7 +15,7 @@ your bank balance, anything that has a number or visual region on a page.
 Configure it once with a click-to-pick element flow, and the widget keeps
 refreshing in the background.
 
-[Website](https://ethansk.github.io/macos-widgets-stats-from-website/) · [Architecture (PLAN.md)](PLAN.md) · [Issues](https://github.com/EthanSK/macos-widgets-stats-from-website/issues) · [Releases](https://github.com/EthanSK/macos-widgets-stats-from-website/releases)
+[Website](https://ethansk.github.io/macos-widgets-stats-from-website/) · [Direct download](https://github.com/EthanSK/macos-widgets-stats-from-website/releases/latest/download/MacosWidgetsStatsFromWebsite-latest.zip) · [Architecture (PLAN.md)](PLAN.md) · [Issues](https://github.com/EthanSK/macos-widgets-stats-from-website/issues) · [Releases](https://github.com/EthanSK/macos-widgets-stats-from-website/releases)
 
 > **Status:** v0.12.2 implements the local app, widget extension, CLI, scraping,
 > snapshot rendering, widget template catalog, self-heal prompts, selector
@@ -48,7 +48,9 @@ macOS Widgets Stats from Website uses Sparkle for automatic updates. Signed rele
 Sparkle appcast at
 `https://ethansk.github.io/macos-widgets-stats-from-website/appcast.xml`; installed apps check
 that feed daily and can also check on demand from **Check for Updates...** in
-the app menu.
+the app menu. GitHub Releases also keep a stable latest-download alias at
+`https://github.com/EthanSK/macos-widgets-stats-from-website/releases/latest/download/MacosWidgetsStatsFromWebsite-latest.zip`.
+See [docs/release.md](docs/release.md) for release setup and validation gates.
 
 ## Features
 
@@ -145,7 +147,10 @@ The release workflow needs GitHub Actions secrets for the Developer ID
 certificate (`APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`),
 Apple notarization credentials (`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`), and
 `SPARKLE_ED25519_PRIVATE_KEY`. It reads the team from `APPLE_TEAM_ID` or
-`DEVELOPMENT_TEAM`, with `T34G959ZG8` checked in as the fallback.
+`DEVELOPMENT_TEAM`, with `T34G959ZG8` checked in as the fallback. Release
+metadata, stable latest-download assets, appcast validation, and the Mac App
+Store/TestFlight assessment are documented in [docs/release.md](docs/release.md)
+and [docs/app-store.md](docs/app-store.md).
 
 ## License
 

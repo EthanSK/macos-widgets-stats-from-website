@@ -1,15 +1,20 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
+    branches:
+      - main
+      - master
     tags:
-      - 'v*.*.*'
+      - 'v*'
 
 permissions:
   contents: write
 
 env:
   APP_NAME: MacosWidgetsStatsFromWebsite
+  LATEST_ZIP_FILENAME: MacosWidgetsStatsFromWebsite-latest.zip
   SPARKLE_VERSION: 2.6.4
   DEVELOPMENT_TEAM_FALLBACK: T34G959ZG8
 
@@ -23,6 +28,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Validate checked-in release metadata
+        run: python3 scripts/validate_release_metadata.py --check-repo --check-version
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
@@ -39,6 +47,8 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
           SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
         run: |
           set -euo pipefail
@@ -50,8 +60,13 @@ jobs:
           done
 
           if [ ${#missing[@]} -ne 0 ]; then
-            printf '::error::Missing required release secret(s): %s\n' "${missing[*]}"
+            printf '::error title=Missing release secret(s)::%s\n' "${missing[*]}"
+            echo '::error::Add the required GitHub Actions secrets documented in docs/release.md before running this workflow.'
             exit 1
+          fi
+
+          if [ -z "${APPLE_TEAM_ID:-${DEVELOPMENT_TEAM:-}}" ]; then
+            echo "::notice title=Using checked-in Apple team fallback::APPLE_TEAM_ID/DEVELOPMENT_TEAM is not set, so the workflow will use $DEVELOPMENT_TEAM_FALLBACK."
           fi
 
       - name: Import Developer ID certificate
@@ -90,6 +105,10 @@ jobs:
 
       - name: Generate Xcode project
         run: xcodegen generate
+
+      - name: Prepare release metadata
+        id: meta
+        run: python3 scripts/prepare_release_metadata.py --apply-plists
 
       - name: Resolve Swift packages
         run: |
@@ -156,16 +175,18 @@ jobs:
           xcrun stapler staple "build/Export/$APP_NAME.app"
           xcrun stapler validate "build/Export/$APP_NAME.app"
 
-      - name: Zip stapled app
-        id: zip
+      - name: Create release ZIPs
+        id: package
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          ZIP_PATH="build/$APP_NAME-${TAG}.zip"
+          ZIP_PATH="build/$ASSET_ZIP_FILENAME"
+          LATEST_ZIP_PATH="build/$LATEST_ZIP_FILENAME"
           ditto -c -k --keepParent "build/Export/$APP_NAME.app" "$ZIP_PATH"
+          cp "$ZIP_PATH" "$LATEST_ZIP_PATH"
           echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
           echo "zip_filename=$(basename "$ZIP_PATH")" >> "$GITHUB_OUTPUT"
           echo "zip_size=$(stat -f%z "$ZIP_PATH")" >> "$GITHUB_OUTPUT"
+          echo "latest_zip_path=$LATEST_ZIP_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Sign ZIP with Sparkle
         id: sparkle
@@ -173,60 +194,77 @@ jobs:
           SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          ED_SIGNATURE="$(./scripts/sign_update "${{ steps.zip.outputs.zip_path }}" "$SPARKLE_ED25519_PRIVATE_KEY")"
+          ED_SIGNATURE="$(./scripts/sign_update "${{ steps.package.outputs.zip_path }}" "$SPARKLE_ED25519_PRIVATE_KEY")"
           if [ -z "$ED_SIGNATURE" ]; then
             echo "::error::Sparkle sign_update returned an empty signature"
             exit 1
           fi
           echo "ed_signature=$ED_SIGNATURE" >> "$GITHUB_OUTPUT"
 
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Compose release body
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
-          cat > build/release-notes.md <<EOF
-          ## macOS Widgets Stats from Website v$VERSION
+          {
+            echo "## $RELEASE_TITLE"
+            echo ""
+            echo "Signed and notarized macOS release for commit \`$GITHUB_SHA\`."
+            echo ""
+            echo "### Downloads"
+            echo ""
+            echo "- Stable latest ZIP: \`$LATEST_ZIP_URL\`"
+            echo "- Versioned ZIP: \`$VERSIONED_ZIP_URL\`"
+            echo ""
+            echo "Existing installs update automatically via Sparkle from:"
+            echo "\`https://ethansk.github.io/macos-widgets-stats-from-website/appcast.xml\`"
+            echo ""
+            echo "Workflow run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo ""
+            echo "Release channel: \`$RELEASE_CHANNEL\`"
+          } > build/release-notes.md
 
-          Signed and notarized macOS release.
-
-          Existing installs update automatically via Sparkle. Use **Check for Updates...** from the app menu to check manually.
-          EOF
-
-          gh release create "$TAG" "${{ steps.zip.outputs.zip_path }}" \
-            --title "macOS Widgets Stats from Website v$VERSION" \
-            --notes-file build/release-notes.md \
-            --target "$GITHUB_SHA" \
-            --latest
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.meta.outputs.RELEASE_TITLE }}
+          body_path: build/release-notes.md
+          files: |
+            ${{ steps.package.outputs.zip_path }}
+            ${{ steps.package.outputs.latest_zip_path }}
+          prerelease: false
+          make_latest: true
 
       - name: Update gh-pages appcast
         env:
           ED_SIGNATURE: ${{ steps.sparkle.outputs.ed_signature }}
-          ZIP_FILENAME: ${{ steps.zip.outputs.zip_filename }}
-          ZIP_SIZE: ${{ steps.zip.outputs.zip_size }}
+          ZIP_FILENAME: ${{ steps.package.outputs.zip_filename }}
+          ZIP_SIZE: ${{ steps.package.outputs.zip_size }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
-          BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' MacosWidgetsStatsFromWebsite/Apps/MainApp/Info.plist)"
           GH_PAGES_DIR="$RUNNER_TEMP/gh-pages"
 
           git fetch origin gh-pages:refs/remotes/origin/gh-pages
           git worktree add -B gh-pages "$GH_PAGES_DIR" origin/gh-pages
 
           APPCAST_PATH="$GH_PAGES_DIR/appcast.xml" \
-          VERSION="$VERSION" \
-          DISPLAY_VERSION="$VERSION" \
-          BUILD_NUMBER="$BUILD_NUMBER" \
-          RELEASE_TAG="$TAG" \
+          VERSION="$RELEASE_VERSION" \
+          DISPLAY_VERSION="$RELEASE_DISPLAY_VERSION" \
+          BUILD_NUMBER="$RELEASE_BUILD_NUMBER" \
+          RELEASE_TAG="$RELEASE_TAG" \
           ZIP_FILENAME="$ZIP_FILENAME" \
           ZIP_SIZE="$ZIP_SIZE" \
           ED_SIGNATURE="$ED_SIGNATURE" \
           REPO="$REPO" \
+          RELEASE_NOTES_URL="$RELEASE_NOTES_URL" \
             python3 scripts/update_appcast.py
+
+          python3 scripts/validate_release_metadata.py \
+            --site-dir "$GH_PAGES_DIR" \
+            --check-site \
+            --check-appcast \
+            --require-appcast-item
 
           echo "GH_PAGES_DIR=$GH_PAGES_DIR" >> "$GITHUB_ENV"
           git -C "$GH_PAGES_DIR" diff -- appcast.xml
@@ -243,7 +281,7 @@ jobs:
             exit 0
           fi
 
-          git -C "$GH_PAGES_DIR" commit -m "chore: update appcast for ${GITHUB_REF_NAME}"
+          git -C "$GH_PAGES_DIR" commit -m "chore: update appcast for ${RELEASE_TAG}"
           git -C "$GH_PAGES_DIR" push origin HEAD:gh-pages
 
       - name: Clean up keychain
