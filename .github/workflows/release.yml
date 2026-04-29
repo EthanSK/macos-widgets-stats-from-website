@@ -1,0 +1,254 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: MacosStatsWidget
+  SPARKLE_VERSION: 2.6.4
+  DEVELOPMENT_TEAM_FALLBACK: T34G959ZG8
+
+jobs:
+  release:
+    name: Build, notarize, publish
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show toolchain versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Validate release secrets
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in APPLE_CERTIFICATE_P12_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD SPARKLE_ED25519_PRIVATE_KEY; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [ ${#missing[@]} -ne 0 ]; then
+            printf '::error::Missing required release secret(s): %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - name: Import Developer ID certificate
+        id: import-cert
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/macos-stats-widget-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S "apple-tool:,apple:,codesign:" \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          existing="$(security list-keychains -d user | tr -d '"' | xargs)"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $existing
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          rm -f "$CERT_PATH"
+          echo "CI_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project MacosStatsWidget.xcodeproj \
+            -scheme MacosStatsWidget \
+            -packageAuthorizationProvider netrc \
+            -scmProvider system
+
+      - name: Build archive
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
+        run: |
+          set -euo pipefail
+          TEAM_ID="${APPLE_TEAM_ID:-${DEVELOPMENT_TEAM:-$DEVELOPMENT_TEAM_FALLBACK}}"
+          xcodebuild archive \
+            -project MacosStatsWidget.xcodeproj \
+            -scheme MacosStatsWidget \
+            -configuration Release \
+            -archivePath build/MacosStatsWidget.xcarchive \
+            -packageAuthorizationProvider netrc \
+            -scmProvider system \
+            DEVELOPMENT_TEAM="$TEAM_ID"
+
+      - name: Export archive
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/MacosStatsWidget.xcarchive \
+            -exportOptionsPlist scripts/ExportOptions.plist \
+            -exportPath build/Export
+
+      - name: Download Sparkle tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/sparkle
+          gh release download "$SPARKLE_VERSION" \
+            --repo sparkle-project/Sparkle \
+            --pattern "Sparkle-$SPARKLE_VERSION.tar.xz" \
+            --dir build/sparkle
+          tar -xf "build/sparkle/Sparkle-$SPARKLE_VERSION.tar.xz" -C build/sparkle
+          test -x "build/sparkle/Sparkle-$SPARKLE_VERSION/bin/sign_update"
+
+      - name: Notarize exported app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
+        run: |
+          set -euo pipefail
+          TEAM_ID="${APPLE_TEAM_ID:-${DEVELOPMENT_TEAM:-$DEVELOPMENT_TEAM_FALLBACK}}"
+          ditto -c -k --keepParent "build/Export/$APP_NAME.app" "build/$APP_NAME-notary.zip"
+          xcrun notarytool submit "build/$APP_NAME-notary.zip" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --wait
+
+      - name: Staple app
+        run: |
+          xcrun stapler staple "build/Export/$APP_NAME.app"
+          xcrun stapler validate "build/Export/$APP_NAME.app"
+
+      - name: Zip stapled app
+        id: zip
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          ZIP_PATH="build/$APP_NAME-${TAG}.zip"
+          ditto -c -k --keepParent "build/Export/$APP_NAME.app" "$ZIP_PATH"
+          echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          echo "zip_filename=$(basename "$ZIP_PATH")" >> "$GITHUB_OUTPUT"
+          echo "zip_size=$(stat -f%z "$ZIP_PATH")" >> "$GITHUB_OUTPUT"
+
+      - name: Sign ZIP with Sparkle
+        id: sparkle
+        env:
+          SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          ED_SIGNATURE="$(./scripts/sign_update "${{ steps.zip.outputs.zip_path }}" "$SPARKLE_ED25519_PRIVATE_KEY")"
+          if [ -z "$ED_SIGNATURE" ]; then
+            echo "::error::Sparkle sign_update returned an empty signature"
+            exit 1
+          fi
+          echo "ed_signature=$ED_SIGNATURE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          cat > build/release-notes.md <<EOF
+          ## macOS Stats Widget v$VERSION
+
+          Signed and notarized macOS release.
+
+          Existing installs update automatically via Sparkle. Use **Check for Updates...** from the app menu to check manually.
+          EOF
+
+          gh release create "$TAG" "${{ steps.zip.outputs.zip_path }}" \
+            --title "macOS Stats Widget v$VERSION" \
+            --notes-file build/release-notes.md \
+            --target "$GITHUB_SHA" \
+            --latest
+
+      - name: Update gh-pages appcast
+        env:
+          ED_SIGNATURE: ${{ steps.sparkle.outputs.ed_signature }}
+          ZIP_FILENAME: ${{ steps.zip.outputs.zip_filename }}
+          ZIP_SIZE: ${{ steps.zip.outputs.zip_size }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' MacosStatsWidget/Apps/MainApp/Info.plist)"
+          GH_PAGES_DIR="$RUNNER_TEMP/gh-pages"
+
+          git fetch origin gh-pages:refs/remotes/origin/gh-pages
+          git worktree add -B gh-pages "$GH_PAGES_DIR" origin/gh-pages
+
+          APPCAST_PATH="$GH_PAGES_DIR/appcast.xml" \
+          VERSION="$VERSION" \
+          DISPLAY_VERSION="$VERSION" \
+          BUILD_NUMBER="$BUILD_NUMBER" \
+          RELEASE_TAG="$TAG" \
+          ZIP_FILENAME="$ZIP_FILENAME" \
+          ZIP_SIZE="$ZIP_SIZE" \
+          ED_SIGNATURE="$ED_SIGNATURE" \
+          REPO="$REPO" \
+            python3 scripts/update_appcast.py
+
+          echo "GH_PAGES_DIR=$GH_PAGES_DIR" >> "$GITHUB_ENV"
+          git -C "$GH_PAGES_DIR" diff -- appcast.xml
+
+      - name: Commit appcast to gh-pages
+        run: |
+          set -euo pipefail
+          git -C "$GH_PAGES_DIR" config user.name "github-actions[bot]"
+          git -C "$GH_PAGES_DIR" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$GH_PAGES_DIR" add appcast.xml
+
+          if git -C "$GH_PAGES_DIR" diff --cached --quiet; then
+            echo "No appcast changes to commit"
+            exit 0
+          fi
+
+          git -C "$GH_PAGES_DIR" commit -m "chore: update appcast for ${GITHUB_REF_NAME}"
+          git -C "$GH_PAGES_DIR" push origin HEAD:gh-pages
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          if [ -n "${CI_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$CI_KEYCHAIN_PATH" || true
+          fi

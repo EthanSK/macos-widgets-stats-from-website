@@ -53,6 +53,12 @@ struct MacosStatsWidgetApp: App {
         }
         .defaultSize(width: 900, height: 620)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates...") {
+                    UpdateController.shared.checkForUpdates()
+                }
+            }
+
             CommandGroup(replacing: .appSettings) {
                 Button("Preferences...") {
                     NSApp.activate(ignoringOtherApps: true)

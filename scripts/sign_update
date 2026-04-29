@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Sign a Sparkle update archive and print only the Ed25519 signature.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ARCHIVE="${1:-}"
+PRIVATE_KEY="${2:-${SPARKLE_ED25519_PRIVATE_KEY:-}}"
+SPARKLE_VERSION="${SPARKLE_VERSION:-2.6.4}"
+KEYCHAIN_ACCOUNT="${SPARKLE_KEYCHAIN_ACCOUNT:-macos-stats-widget}"
+
+if [ -z "$ARCHIVE" ]; then
+  echo "usage: scripts/sign_update <archive.zip> [base64-private-key]" >&2
+  exit 64
+fi
+
+if [ ! -f "$ARCHIVE" ]; then
+  echo "sign_update: archive not found: $ARCHIVE" >&2
+  exit 66
+fi
+
+find_sign_update() {
+  local candidates=(
+    "${SPARKLE_SIGN_UPDATE_PATH:-}"
+    "$ROOT/build/sparkle/Sparkle-$SPARKLE_VERSION/bin/sign_update"
+    "$ROOT"/build/sparkle/Sparkle-*/bin/sign_update
+    "$ROOT/Frameworks/bin/sign_update"
+    /opt/homebrew/Caskroom/sparkle/*/bin/sign_update
+    /Applications/Sparkle*/bin/sign_update
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+SIGN_UPDATE="$(find_sign_update || true)"
+if [ -z "$SIGN_UPDATE" ]; then
+  echo "sign_update: Sparkle sign_update binary was not found." >&2
+  echo "Set SPARKLE_SIGN_UPDATE_PATH or download Sparkle tools into build/sparkle/." >&2
+  exit 69
+fi
+
+if [ -n "$PRIVATE_KEY" ]; then
+  printf '%s\n' "$PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - -p "$ARCHIVE"
+else
+  "$SIGN_UPDATE" --account "$KEYCHAIN_ACCOUNT" -p "$ARCHIVE"
+fi

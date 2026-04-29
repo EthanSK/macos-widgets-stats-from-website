@@ -2,7 +2,8 @@
 
 **See any number on any logged-in webpage at a glance — without opening another tab.**
 
-[![Status](https://img.shields.io/badge/status-v0.12-orange.svg)](PLAN.md)
+[![Status](https://img.shields.io/badge/status-v0.12.1-orange.svg)](PLAN.md)
+[![Release](https://github.com/EthanSK/macos-stats-widget/actions/workflows/release.yml/badge.svg)](https://github.com/EthanSK/macos-stats-widget/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS%2013%2B-blue.svg)](#)
 [![Website](https://img.shields.io/badge/website-ethansk.github.io-7eecaf.svg)](https://ethansk.github.io/macos-stats-widget/)
@@ -16,7 +17,7 @@ refreshing in the background.
 
 [Website](https://ethansk.github.io/macos-stats-widget/) · [Architecture (PLAN.md)](PLAN.md) · [Issues](https://github.com/EthanSK/macos-stats-widget/issues) · [Releases](https://github.com/EthanSK/macos-stats-widget/releases)
 
-> **Status:** v0.12 implements the local app, widget extension, CLI, scraping,
+> **Status:** v0.12.1 implements the local app, widget extension, CLI, scraping,
 > snapshot rendering, widget template catalog, self-heal prompts, selector
 > packs, MCP server, first-launch flow, and polish pass. Read
 > [PLAN.md](PLAN.md) for the canonical architecture and roadmap.
@@ -31,14 +32,23 @@ xcodegen
 open MacosStatsWidget.xcodeproj
 
 # Headless Debug builds:
-xcodebuild -project MacosStatsWidget.xcodeproj -scheme MacosStatsWidget -configuration Debug CODE_SIGNING_ALLOWED=NO build
-xcodebuild -project MacosStatsWidget.xcodeproj -scheme MacosStatsWidgetWidget -configuration Debug CODE_SIGNING_ALLOWED=NO build
-xcodebuild -project MacosStatsWidget.xcodeproj -scheme MacosStatsWidgetCLI -configuration Debug CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project MacosStatsWidget.xcodeproj -scheme MacosStatsWidget -configuration Debug DEVELOPMENT_TEAM=T34G959ZG8 build
+xcodebuild -project MacosStatsWidget.xcodeproj -scheme MacosStatsWidgetWidget -configuration Debug DEVELOPMENT_TEAM=T34G959ZG8 build
+xcodebuild -project MacosStatsWidget.xcodeproj -scheme MacosStatsWidgetCLI -configuration Debug DEVELOPMENT_TEAM=T34G959ZG8 build
 ```
 
-The Debug project keeps `CODE_SIGNING_ALLOWED=NO` for local agent builds. The
-app and widget targets are sandboxed and share data through the App Group
-container.
+The project uses Ethan's Apple Developer team for local signing. For compile-only
+agent checks on machines without signing assets, pass `CODE_SIGNING_ALLOWED=NO`
+on the command line. The app and widget targets are sandboxed and share data
+through the App Group container.
+
+## Updates
+
+macOS Stats Widget uses Sparkle for automatic updates. Signed releases publish a
+Sparkle appcast at
+`https://ethansk.github.io/macos-stats-widget/appcast.xml`; installed apps check
+that feed daily and can also check on demand from **Check for Updates...** in
+the app menu.
 
 ## Features
 
@@ -121,6 +131,20 @@ Read [PLAN.md](PLAN.md) before opening a structural PR — that's the canonical
 architecture document and the place where intent gets argued out before code
 gets written. Bug reports and template suggestions can go straight to
 [Issues](https://github.com/EthanSK/macos-stats-widget/issues).
+
+## Maintainer Notes
+
+The Sparkle Ed25519 private key is stored only in Keychain, never in git. Look
+for the generic password item labeled
+`Sparkle Ed25519 Private Key (macos-stats-widget)`; Sparkle's tools also have
+the same key under service `https://sparkle-project.org` with account
+`macos-stats-widget`.
+
+The release workflow needs GitHub Actions secrets for the Developer ID
+certificate (`APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`),
+Apple notarization credentials (`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`), and
+`SPARKLE_ED25519_PRIVATE_KEY`. It reads the team from `APPLE_TEAM_ID` or
+`DEVELOPMENT_TEAM`, with `T34G959ZG8` checked in as the fallback.
 
 ## License
 
