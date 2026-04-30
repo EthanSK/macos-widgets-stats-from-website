@@ -127,6 +127,20 @@ targets:
         com.apple.security.application-groups:
           - group.com.ethansk.macos-widgets-stats-from-website
 
+  MacosWidgetsStatsFromWebsiteUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: MacosWidgetsStatsFromWebsiteUITests
+    dependencies:
+      - target: MacosWidgetsStatsFromWebsite
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-widgets-stats-from-website.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: MacosWidgetsStatsFromWebsite
+
   MacosWidgetsStatsFromWebsiteCLI:
     type: tool
     platform: macOS
@@ -168,8 +182,13 @@ schemes:
     build:
       targets:
         MacosWidgetsStatsFromWebsite: all
+        MacosWidgetsStatsFromWebsiteUITests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - MacosWidgetsStatsFromWebsiteUITests
     archive:
       config: Release
 

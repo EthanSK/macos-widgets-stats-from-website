@@ -139,18 +139,6 @@ struct FirstLaunchWizardView: View {
                 }
 
                 Section {
-                    HStack {
-                        TextField("SF Symbol", text: $icon)
-                        Image(systemName: icon.isEmpty ? Tracker.defaultIcon : icon)
-                            .frame(width: 24)
-                    }
-
-                    ColorPicker("Accent color", selection: $accentColor, supportsOpacity: false)
-                } header: {
-                    Text("Presentation")
-                }
-
-                Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Button {
                             openIdentifyBrowser()
@@ -187,6 +175,18 @@ struct FirstLaunchWizardView: View {
                     }
                 } header: {
                     Text("Capture")
+                }
+
+                Section {
+                    HStack {
+                        TextField("SF Symbol", text: $icon)
+                        Image(systemName: icon.isEmpty ? Tracker.defaultIcon : icon)
+                            .frame(width: 24)
+                    }
+
+                    ColorPicker("Accent color", selection: $accentColor, supportsOpacity: false)
+                } header: {
+                    Text("Presentation")
                 }
             }
             .formStyle(.grouped)

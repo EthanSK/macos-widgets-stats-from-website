@@ -252,7 +252,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
             return
         }
 
-        NSWorkspace.shared.open(url)
+        openExternalURL(url)
     }
 
     func startIdentifying() {
@@ -325,7 +325,14 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         }
 
         if let scheme = url.scheme?.lowercased(), !["http", "https", "about", "data", "blob"].contains(scheme) {
-            NSWorkspace.shared.open(url)
+            openExternalURL(url)
+            decisionHandler(.cancel)
+            return
+        }
+
+        if shouldOpenExternallyForProviderCompatibility(url) {
+            siteCompatibilityMessage = "Google sign-in was opened in your default browser because Google blocks embedded app browsers. Finish the sign-in there, then return here; if the provider does not sync cookies back to this app, use a non-Google sign-in path for this tracker."
+            openExternalURL(url)
             decisionHandler(.cancel)
             return
         }
@@ -404,11 +411,38 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
             return
         }
 
-        if host == "claude.ai" || host.hasSuffix(".claude.ai") || host == "anthropic.com" || host.hasSuffix(".anthropic.com") {
-            siteCompatibilityMessage = "Claude/Anthropic sign-in may reject embedded browsers or require OAuth/passkey steps in your default browser. This browser keeps a persistent local profile; use Open in Browser if the provider refuses the embedded flow."
+        if isGoogleSignInHost(host) {
+            siteCompatibilityMessage = "Google sign-in cannot run inside this embedded browser, so the app opens it in your default browser instead of showing Google's unsupported embedded-browser error."
+        } else if host == "claude.ai" || host.hasSuffix(".claude.ai") || host == "anthropic.com" || host.hasSuffix(".anthropic.com") {
+            siteCompatibilityMessage = "Claude/Anthropic sign-in may reject embedded browsers or require OAuth/passkey steps in your default browser. Google sign-in is automatically handed off to your default browser to avoid Google's unsupported embedded-browser error."
         } else {
             siteCompatibilityMessage = nil
         }
+    }
+
+    private func shouldOpenExternallyForProviderCompatibility(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else {
+            return false
+        }
+
+        return isGoogleSignInHost(host)
+    }
+
+    private func isGoogleSignInHost(_ host: String) -> Bool {
+        host == "accounts.google.com"
+            || host.hasSuffix(".accounts.google.com")
+            || host == "signin.google.com"
+            || host.hasSuffix(".signin.google.com")
+            || host == "accounts.youtube.com"
+            || host.hasSuffix(".accounts.youtube.com")
+    }
+
+    private func openExternalURL(_ url: URL) {
+        guard ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_SUPPRESS_EXTERNAL_BROWSER_OPEN"] != "1" else {
+            return
+        }
+
+        NSWorkspace.shared.open(url)
     }
 
     private func browserErrorMessage(_ error: Error) -> String {
