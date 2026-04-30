@@ -169,6 +169,7 @@ private final class MCPConnectionSession {
     private let transport: MCPTransport
     private let expectedTokenProvider: () -> String?
     private var isAuthenticated: Bool
+    private var usesContentLengthFraming = false
     private var destructiveOperationDates: [Date] = []
     private var operationDatesByTool: [String: [Date]] = [:]
 
@@ -186,20 +187,36 @@ private final class MCPConnectionSession {
     }
 
     func run() {
+        var pendingHeaders: [String: String] = [:]
+
         while let lineData = readLineData() {
             guard let line = String(data: lineData, encoding: .utf8) else {
                 continue
             }
 
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
+            if trimmed.isEmpty {
+                if let contentLength = pendingContentLength(from: pendingHeaders) {
+                    guard let body = readExactly(byteCount: contentLength) else {
+                        return
+                    }
+                    usesContentLengthFraming = true
+                    pendingHeaders.removeAll()
+                    handleJSONLine(body)
+                }
                 continue
             }
 
-            if handleHeaderLine(trimmed) {
+            if let header = parseHeaderLine(trimmed) {
+                pendingHeaders[header.name.lowercased()] = header.value
+                handleAuthenticationHeader(name: header.name, value: header.value)
+                if header.name.caseInsensitiveCompare("Content-Length") == .orderedSame {
+                    usesContentLengthFraming = true
+                }
                 continue
             }
 
+            pendingHeaders.removeAll()
             handleJSONLine(Data(trimmed.utf8))
         }
     }
@@ -220,15 +237,46 @@ private final class MCPConnectionSession {
         }
     }
 
-    private func handleHeaderLine(_ line: String) -> Bool {
-        let lowercased = line.lowercased()
-        guard lowercased.hasPrefix("x-auth:") else {
-            return false
+    private func readExactly(byteCount: Int) -> Data? {
+        guard byteCount >= 0 else {
+            return nil
         }
 
-        let token = String(line.dropFirst("X-Auth:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        isAuthenticated = tokenMatches(token)
-        return true
+        var data = Data()
+        while data.count < byteCount {
+            let chunk = input.readData(ofLength: byteCount - data.count)
+            if chunk.isEmpty {
+                return nil
+            }
+            data.append(chunk)
+        }
+        return data
+    }
+
+    private func parseHeaderLine(_ line: String) -> (name: String, value: String)? {
+        guard !line.hasPrefix("{"),
+              let separatorIndex = line.firstIndex(of: ":") else {
+            return nil
+        }
+
+        let name = String(line[..<separatorIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = String(line[line.index(after: separatorIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            return nil
+        }
+        return (name, value)
+    }
+
+    private func pendingContentLength(from headers: [String: String]) -> Int? {
+        headers["content-length"].flatMap(Int.init)
+    }
+
+    private func handleAuthenticationHeader(name: String, value: String) {
+        guard name.caseInsensitiveCompare("X-Auth") == .orderedSame else {
+            return
+        }
+
+        isAuthenticated = tokenMatches(value)
     }
 
     private func handleJSONLine(_ data: Data) {
@@ -380,9 +428,14 @@ private final class MCPConnectionSession {
             return
         }
 
-        var line = data
-        line.append(10)
-        try? output.write(contentsOf: line)
+        if usesContentLengthFraming {
+            let header = "Content-Length: \(data.count)\r\n\r\n"
+            try? output.write(contentsOf: Data(header.utf8) + data)
+        } else {
+            var line = data
+            line.append(10)
+            try? output.write(contentsOf: line)
+        }
     }
 }
 
@@ -439,10 +492,14 @@ private enum MCPError: Error {
 
 private enum MCPToolCatalog {
     static let destructiveToolNames: Set<String> = [
+        "add_tracker",
+        "update_tracker",
         "delete_tracker",
-        "delete_widget_configuration",
         "update_widget_configuration",
-        "import_selector_pack"
+        "delete_widget_configuration",
+        "import_selector_pack",
+        "attach_webhook",
+        "reset_tracker_failure_state"
     ]
 
     static let toolNames = Set(tools.compactMap { $0["name"] as? String })
@@ -484,6 +541,10 @@ private enum MCPToolCatalog {
         tool("trigger_scrape", "Force-refresh one tracker now and return the resulting reading.", [
             "id": stringSchema("Tracker UUID")
         ], required: ["id"]),
+        tool("reset_tracker_failure_state", "Clear stale/broken failure metadata after a manual selector or sign-in repair, then mark the tracker stale until the next scrape proves it works.", [
+            "id": stringSchema("Tracker UUID"),
+            "reason": stringSchema("Optional short reason recorded in lastError while the next scrape is pending")
+        ], required: ["id"]),
         tool("identify_element", "Open the running app's visible browser and wait for the user to confirm an element. Requires the app socket transport; stdio-only clients cannot show UI.", [
             "trackerId": stringSchema("Existing tracker UUID to update after the user picks an element. Omit to create a pending tracker."),
             "url": stringSchema("HTTPS URL, or http://localhost for testing. Required when trackerId is omitted."),
@@ -523,7 +584,7 @@ private enum MCPToolCatalog {
                 "type": ["string", "null"],
                 "description": "Webhook URL, or null to clear."
             ]
-        ])
+        ], required: ["url"])
     ]
 
     private static func tool(
@@ -605,6 +666,8 @@ private enum MCPToolDispatcher {
             return try deleteTracker(arguments)
         case "trigger_scrape":
             return try triggerScrape(arguments)
+        case "reset_tracker_failure_state":
+            return try resetTrackerFailureState(arguments)
         case "identify_element":
             return try identifyElement(arguments, context: context)
         case "list_widget_configurations":
@@ -628,6 +691,8 @@ private enum MCPToolDispatcher {
 
     private static func getStatus(context: MCPToolContext) -> Any {
         let configuration = AppGroupStore.loadSharedConfiguration()
+        let readings = AppGroupStore.loadReadings().readings
+        let health = trackerHealthPayload(trackers: configuration.trackers, readings: readings)
         return [
             "serverInfo": [
                 "name": "macos-widgets-stats-from-website",
@@ -644,6 +709,7 @@ private enum MCPToolDispatcher {
                 "trackers": configuration.trackers.count,
                 "widgetConfigurations": configuration.widgetConfigurations.count
             ],
+            "health": health,
             "tools": Array(MCPToolCatalog.toolNames).sorted()
         ]
     }
@@ -697,6 +763,7 @@ private enum MCPToolDispatcher {
     private static func updateTracker(_ arguments: [String: Any]) throws -> Any {
         let id = try uuidArgument("id", arguments)
         var updatedTracker: Tracker?
+        var shouldResetFailureState = false
 
         try AppGroupStore.mutateSharedConfiguration { configuration in
             guard let index = configuration.trackers.firstIndex(where: { $0.id == id }) else {
@@ -709,6 +776,7 @@ private enum MCPToolDispatcher {
             }
             if arguments.keys.contains("url") {
                 tracker.url = try urlArgument("url", arguments).absoluteString
+                shouldResetFailureState = true
             }
             if let value = arguments["label"] as? String {
                 tracker.label = value.nilIfEmpty
@@ -724,23 +792,32 @@ private enum MCPToolDispatcher {
             }
             if let mode = renderModeArgument(arguments["renderMode"]) {
                 tracker.renderMode = mode
+                shouldResetFailureState = true
             }
             if let value = arguments["selector"] as? String {
                 tracker.selector = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                shouldResetFailureState = true
             }
             if arguments.keys.contains("elementBoundingBox") {
                 tracker.elementBoundingBox = try boundingBoxArgument("elementBoundingBox", arguments)
+                shouldResetFailureState = true
             }
             if let hideElements = stringArrayArgument("hideElements", arguments) {
                 tracker.hideElements = hideElements
+                shouldResetFailureState = true
             }
 
             configuration.trackers[index] = tracker
             updatedTracker = tracker
         }
 
+        let tracker = try require(updatedTracker, "Updated tracker was not produced.")
+        if shouldResetFailureState {
+            try AppGroupStore.resetFailureState(for: tracker.id, reason: "Tracker configuration changed; waiting for the next scrape to verify it.")
+        }
+
         notifyConfigurationChanged()
-        return trackerPayload(try require(updatedTracker, "Updated tracker was not produced."), includeHistory: true)
+        return trackerPayload(tracker, includeHistory: true)
     }
 
     private static func deleteTracker(_ arguments: [String: Any]) throws -> Any {
@@ -780,6 +857,18 @@ private enum MCPToolDispatcher {
         }
 
         return readingPayload(reading, includeHistory: true)
+    }
+
+    private static func resetTrackerFailureState(_ arguments: [String: Any]) throws -> Any {
+        let id = try uuidArgument("id", arguments)
+        let configuration = AppGroupStore.loadSharedConfiguration()
+        guard let tracker = configuration.trackers.first(where: { $0.id == id }) else {
+            throw MCPError.notFound("Tracker \(id.uuidString) was not found.")
+        }
+
+        _ = try AppGroupStore.resetFailureState(for: id, reason: arguments["reason"] as? String)
+        notifyConfigurationChanged()
+        return trackerPayload(tracker, includeHistory: true)
     }
 
     private static func identifyElement(_ arguments: [String: Any], context: MCPToolContext) throws -> Any {
@@ -975,12 +1064,24 @@ private enum MCPToolDispatcher {
     }
 
     private static func attachWebhook(_ arguments: [String: Any]) throws -> Any {
-        try AppGroupStore.mutateSharedConfiguration { configuration in
-            if arguments["url"] is NSNull {
-                configuration.preferences.notificationChannels.webhook = nil
-            } else {
-                configuration.preferences.notificationChannels.webhook = (arguments["url"] as? String)?.nilIfEmpty
+        guard arguments.keys.contains("url") else {
+            throw MCPError.invalidParams("url is required; pass null to clear the webhook.")
+        }
+
+        let webhookURL: String?
+        if arguments["url"] is NSNull {
+            webhookURL = nil
+        } else if let value = arguments["url"] as? String, let trimmed = value.nilIfEmpty {
+            guard isValidWebhookURL(trimmed) else {
+                throw MCPError.validation("Webhook URL must be http:// or https:// with a host.")
             }
+            webhookURL = trimmed
+        } else {
+            throw MCPError.invalidParams("url must be a webhook URL string or null.")
+        }
+
+        try AppGroupStore.mutateSharedConfiguration { configuration in
+            configuration.preferences.notificationChannels.webhook = webhookURL
         }
         notifyConfigurationChanged()
         return ["ok": true]
@@ -1003,6 +1104,41 @@ private enum MCPToolDispatcher {
         }
 
         return result ?? .failure(MCPError.internalError("Scrape finished without a result."))
+    }
+
+    private static func trackerHealthPayload(trackers: [Tracker], readings: [String: TrackerReading]) -> [String: Any] {
+        var statusCounts: [String: Int] = [
+            "ok": 0,
+            "stale": 0,
+            "broken": 0,
+            "notReadYet": 0
+        ]
+        var staleTrackerIDs: [String] = []
+        var brokenTrackerIDs: [String] = []
+
+        for tracker in trackers {
+            guard let reading = readings[tracker.id.uuidString] else {
+                statusCounts["notReadYet", default: 0] += 1
+                staleTrackerIDs.append(tracker.id.uuidString)
+                continue
+            }
+
+            statusCounts[reading.status.rawValue, default: 0] += 1
+            switch reading.status {
+            case .ok:
+                break
+            case .stale:
+                staleTrackerIDs.append(tracker.id.uuidString)
+            case .broken:
+                brokenTrackerIDs.append(tracker.id.uuidString)
+            }
+        }
+
+        return [
+            "statusCounts": statusCounts,
+            "staleTrackerIds": staleTrackerIDs,
+            "brokenTrackerIds": brokenTrackerIDs
+        ]
     }
 
     private static func trackerPayload(_ tracker: Tracker, includeHistory: Bool) -> [String: Any] {
@@ -1106,6 +1242,17 @@ private enum MCPToolDispatcher {
         }
 
         throw MCPError.validation("Scrape URLs must be https://, or http://localhost for testing.")
+    }
+
+    private static func isValidWebhookURL(_ string: String) -> Bool {
+        guard let url = URL(string: string),
+              let scheme = url.scheme?.lowercased(),
+              let host = url.host,
+              !host.isEmpty else {
+            return false
+        }
+
+        return scheme == "https" || scheme == "http"
     }
 
     private static func stringArgument(_ key: String, _ arguments: [String: Any]) throws -> String {

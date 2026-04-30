@@ -99,18 +99,47 @@ shape and migration strategy.
 
 The app embeds an MCP server. Any external MCP client — your Codex CLI, Claude
 Code session, or anything else that speaks MCP — can connect to it and manage
-trackers, trigger scrapes, request the visible element-identification flow, and
-manage widget configurations. The app itself never spawns AI binaries; agent
-involvement always runs in your own agent's session. See
+trackers, trigger scrapes, request the visible element-identification flow,
+repair stale/broken tracker state after a manual fix, attach a generic broken-
+tracker webhook, and manage widget configurations. The app itself never spawns
+AI binaries; agent involvement always runs in your own agent's session. See
 [PLAN.md §13 MCP Server](PLAN.md#13-mcp-server) for transport, auth, and the
-tool catalog.
+complete tool catalog.
 
-The server listens on stdio when launched as an MCP subprocess and on
-`~/Library/Application Support/MacosWidgetsStatsFromWebsite/mcp.sock` for local socket
-clients. Retrieve the shared token from Preferences → MCP and send it with
-`X-Auth` or the initialization message. Use the socket transport when an agent
-needs to open the app's visible browser for Identify Element; stdio is suitable
-for headless tracker/configuration operations.
+The server supports standard MCP/JSON-RPC `Content-Length` framing over stdio
+when launched as an MCP subprocess, plus a local UNIX socket while the app is
+running. Preferences → MCP shows the exact socket path and current launch token.
+Socket clients authenticate with either an `X-Auth: <token>` header line before
+the first JSON-RPC request or a `token` field in `initialize.params`. Stdio is
+suitable for headless tracker/configuration operations; the socket transport is
+required when an agent needs the live app to open its visible browser for
+`identify_element`.
+
+Minimal stdio MCP config shape:
+
+```json
+{
+  "mcpServers": {
+    "macos-widgets-stats-from-website": {
+      "command": "/Applications/macOS Widgets Stats from Website.app/Contents/MacOS/MacosWidgetsStatsFromWebsite",
+      "args": ["--mcp-stdio"]
+    }
+  }
+}
+```
+
+Useful setup flow for an assistant:
+
+1. Call `get_status` and `tools/list`.
+2. If a selector is already known, call `add_tracker`; otherwise call
+   `identify_element` over the app socket and have the user pick the element in
+   the visible browser.
+3. Call `trigger_scrape` to verify the reading.
+4. Call `update_widget_configuration` to create the widget layout.
+5. If a tracker later becomes stale/broken, inspect it with `list_trackers` /
+   `get_tracker`, repair it with `update_tracker` or socket-only
+   `identify_element`, then `trigger_scrape` or `reset_tracker_failure_state` if
+   verification must wait for the next scheduled scrape.
 
 ## Caveats
 

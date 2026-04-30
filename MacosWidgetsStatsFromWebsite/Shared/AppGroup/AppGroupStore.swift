@@ -220,6 +220,22 @@ final class AppGroupStore: ObservableObject {
         }
     }
 
+    @discardableResult
+    static func resetFailureState(for trackerID: UUID, reason: String? = nil) throws -> TrackerReading {
+        try withReadingsMutationLock {
+            var file = loadReadingsUnlocked()
+            let key = trackerID.uuidString
+            var reading = file.readings[key] ?? TrackerReading(lastUpdatedAt: nil, status: .stale)
+            reading.status = .stale
+            reading.lastError = trimmedNonEmpty(reason)
+            reading.consecutiveFailureCount = 0
+            file.schemaVersion = currentSchemaVersion
+            file.readings[key] = reading
+            try write(readingsFile: file)
+            return reading
+        }
+    }
+
     private static func loadConfiguration() -> AppConfiguration {
         loadConfiguration(from: AppGroupPaths.canonicalTrackersURL())
     }
@@ -578,6 +594,13 @@ final class AppGroupStore: ObservableObject {
             code: Int(code),
             userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(code))]
         )
+    }
+
+    private static func trimmedNonEmpty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
     }
 
     private static func intValue(from value: Any?) -> Int? {

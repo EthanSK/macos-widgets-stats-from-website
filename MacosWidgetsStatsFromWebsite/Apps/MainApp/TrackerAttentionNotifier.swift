@@ -33,9 +33,23 @@ final class TrackerAttentionNotifier {
     }
 
     func notifyBrokenTracker(_ tracker: Tracker, failureCount: Int) {
+        let configuration = AppGroupStore.loadSharedConfiguration()
+        let title = "\(tracker.name.isEmpty ? "Tracker" : tracker.name) needs attention"
+        let body = "The selector has failed \(failureCount) times. Open the app to re-identify the element."
+
+        if configuration.preferences.notificationChannels.macosNative {
+            sendNativeNotification(title: title, body: body, tracker: tracker)
+        }
+
+        if let webhookURL = configuration.preferences.notificationChannels.webhook {
+            postWebhook(urlString: webhookURL, title: title, body: body, trackerID: tracker.id)
+        }
+    }
+
+    private func sendNativeNotification(title: String, body: String, tracker: Tracker) {
         let content = UNMutableNotificationContent()
-        content.title = "\(tracker.name.isEmpty ? "Tracker" : tracker.name) needs attention"
-        content.body = "The selector has failed \(failureCount) times. Open the app to re-identify the element."
+        content.title = title
+        content.body = body
         content.categoryIdentifier = Self.categoryIdentifier
         content.sound = .default
         content.userInfo = ["trackerID": tracker.id.uuidString]
@@ -47,5 +61,25 @@ final class TrackerAttentionNotifier {
             trigger: nil
         )
         UNUserNotificationCenter.current().add(request)
+    }
+
+    private func postWebhook(urlString: String, title: String, body: String, trackerID: UUID) {
+        guard let url = URL(string: urlString),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "title": title,
+            "body": body,
+            "severity": "broken",
+            "trackerId": trackerID.uuidString
+        ])
+
+        URLSession.shared.dataTask(with: request).resume()
     }
 }

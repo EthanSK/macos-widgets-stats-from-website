@@ -50,7 +50,7 @@ struct MCPPrefsView: View {
             }
 
             Section {
-                Text("Agents can list, create, edit, and delete trackers; request visible browser element identification; trigger scrapes; and manage widget configurations.")
+                Text("Agents can list, create, edit, and delete trackers; request visible browser element identification; trigger scrapes; reset stale/broken failure state after a manual repair; attach a webhook; and manage widget configurations.")
                     .foregroundStyle(.secondary)
             } header: {
                 Text("Tool coverage")

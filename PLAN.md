@@ -1124,13 +1124,16 @@ user-facing feature is reachable as a tool.
 Two transports, picked at startup based on caller context:
 
 - **Stdio.** When invoked as a child process by an MCP client (the agent's
-  MCP config points at the `.app/Contents/MacOS/macos-widgets-stats-from-website-mcp`
-  binary, or to a launcher script). JSON-RPC 2.0 over stdin / stdout.
-  **App Store-safe** — no socket, no listener, no network entitlement.
+  MCP config points at the app executable with `--mcp-stdio`, or to the
+  standalone CLI with `mcp-stdio`). JSON-RPC 2.0 over stdin / stdout using
+  standard MCP `Content-Length` framing; newline-delimited JSON is also kept for
+  local smoke clients. **App Store-safe** — no socket, no listener, no network
+  server entitlement.
 - **UNIX domain socket.** When the main app is already running, it binds a
-  socket at `~/Library/Group Containers/<group-id>/mcp.sock` and serves
-  the same JSON-RPC. Clients can connect without re-launching the app.
-  Sandbox permits sockets inside the App Group container.
+  socket inside the App Group container (Preferences → MCP shows the exact
+  path, normally `~/Library/Group Containers/group.com.ethansk.macos-widgets-stats-from-website/mcp.sock`)
+  and serves the same JSON-RPC. Clients can connect without re-launching the
+  app. Sandbox permits sockets inside the App Group container.
 
 The agent picks one — **stdio** is suitable for headless tracker/configuration
 operations, while **socket** is required for tools that need the live app UI
@@ -1142,13 +1145,14 @@ The MCP server exposes the entire app feature set as tools. Initial set:
 
 | Tool | Signature | Description |
 |---|---|---|
-| `get_status` | `() → Status` | Server status, browser profile, transport, data counts, and available tool names. |
+| `get_status` | `() → Status` | Server status, browser profile, transport, data counts, tracker health counts/IDs, and available tool names. |
 | `list_trackers` | `() → [Tracker]` | Return all trackers with current values, status, last-updated. |
 | `get_tracker` | `(id) → Tracker & {history}` | Current value + sparkline + full config. |
 | `add_tracker` | `(name, url, renderMode, selector, …) → {id}` | Add a tracker. Selector required if known; if absent, agent should call `identify_element` instead. |
 | `update_tracker` | `(id, fields…) → Tracker` | Modify name, URL, selector, element bounds, label, icon, refresh interval, etc. |
 | `delete_tracker` | `(id) → {ok}` | Remove a tracker (also unlinks from any `widgetConfigurations`). |
 | `trigger_scrape` | `(id) → TrackerResult` | Force-refresh one tracker now. |
+| `reset_tracker_failure_state` | `(id, reason?) → Tracker` | Clear stale/broken failure metadata after a manual repair and mark the tracker stale until the next scrape proves it works. |
 | `identify_element` | `(trackerId?, url?) → {trackerId, status: "awaiting_user"}` | **Human-in-the-loop.** Socket-only. Open the in-app browser, prompt the user for sign-in + Identify Element, then update the existing or pending tracker. |
 | `list_widget_configurations` | `() → [WidgetConfiguration]` | All widget compositions. |
 | `get_widget_configuration` | `(id) → WidgetConfiguration` | One widget composition. |
@@ -1171,9 +1175,9 @@ Future tools (post-v1, listed for visibility): `pause_tracker`,
   2. **Shared-secret handshake.** On `initialize`, the client must send a
      token stored in Keychain under `mcp-secret/macos-widgets-stats-from-website`. The
      token is regenerated on each app launch. The user retrieves the
-     current token from Preferences → MCP → "Reveal token" (or via a
-     companion CLI command in the Homebrew tap) and pastes it into their
-     agent's MCP config.
+     current token from Preferences → MCP → "Reveal token" (or via `mcp-token`
+     in the companion CLI) and passes it either as an `X-Auth: <token>` header
+     line before the first JSON-RPC request or as `initialize.params.token`.
 
 ### 13.4 Security
 
@@ -1181,9 +1185,11 @@ Future tools (post-v1, listed for visibility): `pause_tracker`,
   socket transport — the user must complete the capture flow in the visible
   browser. This prevents an agent (compromised or otherwise) from quietly
   tracking new pages.
-- `delete_tracker`, `delete_widget_configuration`, `update_widget_configuration`,
-  and `import_selector_pack` are destructive; the app rate-limits them (max 10
-  per minute per session) and surfaces an undo toast in the main app window.
+- `add_tracker`, `update_tracker`, `delete_tracker`, `update_widget_configuration`,
+  `delete_widget_configuration`, `import_selector_pack`, `attach_webhook`, and
+  `reset_tracker_failure_state` are state-changing; the app rate-limits them
+  (max 10 destructive/state-changing operations per minute per session) and
+  reloads the UI from disk after MCP configuration changes.
 - All scrape URLs are validated as `https://` only (or `http://localhost`
   for testing). No `file://`, no `javascript:`.
 - The MCP server writes a local diagnostic log to
@@ -1200,8 +1206,8 @@ This is documentation, not code, and lives in the README and project site —
 
 ```
 # Claude Code (~/.claude/skills/your-name-here/SKILL.md)
-This MCP server is at /Applications/macOS Widgets Stats from Website.app/.../macos-widgets-stats-from-website-mcp
-Auth token: see Preferences → MCP → "Reveal token" in the app
+This MCP server is at /Applications/macOS Widgets Stats from Website.app/Contents/MacOS/MacosWidgetsStatsFromWebsite --mcp-stdio
+Socket path/token: see Preferences → MCP in the running app
 
 # Codex CLI (~/.codex/AGENTS.md or whatever the user uses)
 Same idea — point your agent's MCP config at the binary or socket.
