@@ -295,11 +295,17 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         isLoading = false
+        guard !isBenignNavigationCancellation(error) else {
+            return
+        }
         inlineError = browserErrorMessage(error)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         isLoading = false
+        guard !isBenignNavigationCancellation(error) else {
+            return
+        }
         inlineError = browserErrorMessage(error)
     }
 
@@ -406,12 +412,12 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     }
 
     private func browserErrorMessage(_ error: Error) -> String {
-        let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
-            return "Navigation was cancelled."
-        }
+        "Page load failed: \(error.localizedDescription)"
+    }
 
-        return "Page load failed: \(error.localizedDescription)"
+    private func isBenignNavigationCancellation(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
     private func installObservers() {

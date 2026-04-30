@@ -162,7 +162,12 @@ struct TrackerEditorView: View {
     }
 
     private var validatedURL: URL? {
-        guard let components = URLComponents(string: trimmedURL),
+        guard !trimmedURL.isEmpty else {
+            return nil
+        }
+
+        let normalized = trimmedURL.contains("://") ? trimmedURL : "https://\(trimmedURL)"
+        guard let components = URLComponents(string: normalized),
               let scheme = components.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
               components.host?.isEmpty == false,
@@ -178,7 +183,7 @@ struct TrackerEditorView: View {
             return ""
         }
 
-        return "Enter a valid http or https URL."
+        return "Enter a valid http or https URL. You can omit https:// for normal domains."
     }
 
     private var captureValidationMessage: String {

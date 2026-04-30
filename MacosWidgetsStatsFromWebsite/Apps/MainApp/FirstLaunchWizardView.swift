@@ -220,7 +220,7 @@ struct FirstLaunchWizardView: View {
                 Button("Save Tracker") {
                     saveFirstTracker()
                 }
-                .disabled(selectedURL == nil || trimmedTrackerName.isEmpty)
+                .disabled(!canSaveTracker)
                 .keyboardShortcut(.defaultAction)
             }
         }
