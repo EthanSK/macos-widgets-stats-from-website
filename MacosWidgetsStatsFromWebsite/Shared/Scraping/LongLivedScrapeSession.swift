@@ -247,7 +247,7 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
         pendingSnapshot = false
 
         let frame = initialFrame(for: tracker)
-        let webView = webView ?? WKWebView(frame: frame, configuration: WebViewProfile.shared.makeConfiguration())
+        let webView = webView ?? WebViewProfile.shared.makeWebView(frame: frame)
         webView.frame = frame
         webView.navigationDelegate = self
         self.webView = webView

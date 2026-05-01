@@ -67,7 +67,7 @@ final class WKWebViewScraper: NSObject, WKNavigationDelegate {
         }
 
         let frame = initialFrame(for: tracker)
-        let webView = WKWebView(frame: frame, configuration: WebViewProfile.shared.makeConfiguration())
+        let webView = WebViewProfile.shared.makeWebView(frame: frame)
         webView.navigationDelegate = self
         self.webView = webView
         timeout = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in

@@ -170,7 +170,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
 
         userContentController.add(identifyCoordinator, name: "elementPicked")
         userContentController.add(identifyCoordinator, name: "inspectError")
-        webView = WKWebView(frame: .zero, configuration: WebViewProfile.shared.makeConfiguration(userContentController: userContentController))
+        webView = WebViewProfile.shared.makeWebView(frame: .zero, userContentController: userContentController)
 
         super.init()
 
