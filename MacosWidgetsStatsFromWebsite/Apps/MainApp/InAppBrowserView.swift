@@ -312,6 +312,12 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
             return
         }
 
+        if Self.isOAuthConsentURL(url) {
+            openExternalURL(url)
+            decisionHandler(.cancel)
+            return
+        }
+
         if navigationAction.targetFrame == nil {
             webView.load(navigationAction.request)
             decisionHandler(.cancel)
@@ -319,6 +325,22 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         }
 
         decisionHandler(.allow)
+    }
+
+    // Google's OAuth consent page uses FedCM (navigator.credentials.get with
+    // identity provider) to confirm device-bind state from the 2FA tap.
+    // WKWebView's FedCM support is incomplete — the Promise stalls indefinitely.
+    // This narrow deflection sends ONLY the consent step to the system browser;
+    // the earlier email/password/2FA steps stay in-app via UA-spoof.
+    // Phase-1 (bundled Chromium) removes the need for this entirely.
+    private static func isOAuthConsentURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        let isAccountsGoogleHost = host == "accounts.google.com" || host.hasSuffix(".accounts.google.com")
+        guard isAccountsGoogleHost else { return false }
+
+        let path = url.path
+        return path.hasPrefix("/signin/oauth/consent")
+            || path.hasPrefix("/o/oauth2/auth/oauthchooseaccount")
     }
 
     func webView(
