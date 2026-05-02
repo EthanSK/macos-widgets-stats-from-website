@@ -38,6 +38,14 @@ struct InAppBrowserView: View {
                     .padding(.horizontal, 10)
                     .padding(.bottom, 6)
             }
+            if let inlineNotice = controller.inlineNotice {
+                Text(inlineNotice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 6)
+            }
             Divider()
             WebViewHost(webView: controller.webView)
         }
@@ -133,6 +141,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     @Published var isLoading = false
     @Published var isIdentifying = false
     @Published var inlineError: String?
+    @Published var inlineNotice: String?
     @Published var preview: ElementCapturePreview?
 
     var currentURLForExternalOpen: URL? {
@@ -225,6 +234,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
 
     func load(_ url: URL) {
         inlineError = nil
+        inlineNotice = nil
         urlText = url.absoluteString
         webView.load(URLRequest(url: url))
     }
@@ -312,6 +322,12 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
             return
         }
 
+        if Self.shouldDeflectGoogleOAuthConsent(navigationAction: navigationAction, url: url) {
+            deflectGoogleOAuthConsent(url)
+            decisionHandler(.cancel)
+            return
+        }
+
         if navigationAction.targetFrame == nil {
             webView.load(navigationAction.request)
             decisionHandler(.cancel)
@@ -321,12 +337,42 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         decisionHandler(.allow)
     }
 
+    // Google's OAuth consent step can stall indefinitely in WKWebView after
+    // email/password/2FA succeeds. Keep the rest of Google sign-in in-app, but
+    // punt this one known-broken consent/picker route to the user's browser.
+    private static func shouldDeflectGoogleOAuthConsent(navigationAction: WKNavigationAction, url: URL) -> Bool {
+        guard isGoogleOAuthConsentURL(url) else { return false }
+        guard let targetFrame = navigationAction.targetFrame else { return true }
+        return targetFrame.isMainFrame
+    }
+
+    private static func isGoogleOAuthConsentURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        let isAccountsGoogleHost = host == "accounts.google.com" || host.hasSuffix(".accounts.google.com")
+        guard isAccountsGoogleHost else { return false }
+
+        let path = url.path
+        return path.hasPrefix("/signin/oauth/consent")
+            || path.hasPrefix("/o/oauth2/auth/oauthchooseaccount")
+            || path.hasSuffix("/oauthchooseaccount")
+    }
+
+    private func deflectGoogleOAuthConsent(_ url: URL) {
+        inlineNotice = "Opened Google's OAuth consent step in your default browser because it currently stalls in the embedded browser. Finish the sign-in there, then return here."
+        openExternalURL(url)
+    }
+
     func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
+        if let url = navigationAction.request.url, Self.isGoogleOAuthConsentURL(url) {
+            deflectGoogleOAuthConsent(url)
+            return nil
+        }
+
         if navigationAction.targetFrame == nil {
             webView.load(navigationAction.request)
         }

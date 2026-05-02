@@ -42,33 +42,96 @@ final class WebViewProfile {
 
     private init() {}
 
-    // FedCM-rejection polyfill: Google's OAuth consent page calls
-    // navigator.credentials.get({identity:...}) and stalls in WKWebView
-    // because FedCM isn't implemented. Force-rejecting the call lets
-    // Google fall back to its non-FedCM flow, which renders normally.
-    // If this works, the consent-URL deflection in InAppBrowserView.swift
-    // (commit eef38b1) becomes redundant.
+    // FedCM-rejection shim: Google's OAuth consent page can call
+    // navigator.credentials.get({ identity: ... }) and stall in WKWebView
+    // because FedCM is incomplete there. The native method may also be
+    // installed/restored after atDocumentStart, so keep re-applying the
+    // shim briefly and inject it into Google-owned frames too.
+    // This is best-effort only; InAppBrowserView still has a narrow external
+    // deflection for the known-broken consent route.
     private static let fedCMRejectionPolyfillSource = """
     (function() {
       try {
-        if (!location.hostname.endsWith('accounts.google.com')) return;
-        if (!navigator.credentials || typeof navigator.credentials.get !== 'function') return;
-        var origGet = navigator.credentials.get.bind(navigator.credentials);
-        navigator.credentials.get = function(options) {
-          if (options && options.identity) {
-            return Promise.reject(new DOMException('FedCM not supported', 'NotSupportedError'));
+        if (!/(^|\\.)accounts\\.google\\.com$/i.test(location.hostname)) return;
+
+        var originalGet = null;
+        var attempts = 0;
+        var timer = null;
+
+        function shouldRejectFedCM(options) {
+          return !!(options && (options.identity || options.federated));
+        }
+
+        function rejected(message) {
+          return Promise.reject(new DOMException(message || 'FedCM not supported in WKWebView', 'NotSupportedError'));
+        }
+
+        function install() {
+          attempts += 1;
+          var credentials = navigator.credentials;
+          if (!credentials || typeof credentials.get !== 'function') return;
+
+          if (!originalGet && !credentials.__statsWidgetFedCMOriginalGet) {
+            originalGet = credentials.get.bind(credentials);
+            try {
+              Object.defineProperty(credentials, '__statsWidgetFedCMOriginalGet', {
+                value: originalGet,
+                configurable: true
+              });
+            } catch (_) {}
+          } else if (!originalGet && credentials.__statsWidgetFedCMOriginalGet) {
+            originalGet = credentials.__statsWidgetFedCMOriginalGet;
           }
-          return origGet(options);
-        };
+
+          var shimmedGet = function(options) {
+            if (shouldRejectFedCM(options)) {
+              return rejected('FedCM not supported in WKWebView');
+            }
+            return originalGet ? originalGet(options) : rejected('Credentials API unavailable');
+          };
+
+          try {
+            Object.defineProperty(credentials, 'get', {
+              value: shimmedGet,
+              configurable: true,
+              enumerable: true,
+              writable: true
+            });
+          } catch (_) {
+            try { credentials.get = shimmedGet; } catch (_) {}
+          }
+
+          if (attempts > 400 && timer) {
+            clearInterval(timer);
+            timer = null;
+          }
+        }
+
+        install();
+        document.addEventListener('readystatechange', install, true);
+        window.addEventListener('DOMContentLoaded', install, true);
+        window.addEventListener('load', install, true);
+        timer = setInterval(install, 25);
       } catch (e) { /* swallow — never break the page */ }
     })();
     """
 
-    private static let fedCMRejectionPolyfillScript: WKUserScript = WKUserScript(
-        source: fedCMRejectionPolyfillSource,
-        injectionTime: .atDocumentStart,
-        forMainFrameOnly: true
-    )
+    private static var fedCMRejectionPolyfillScript: WKUserScript {
+        if #available(macOS 11.0, *) {
+            return WKUserScript(
+                source: fedCMRejectionPolyfillSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false,
+                in: .page
+            )
+        }
+
+        return WKUserScript(
+            source: fedCMRejectionPolyfillSource,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+    }
 
     func makeConfiguration(userContentController: WKUserContentController = WKUserContentController()) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
