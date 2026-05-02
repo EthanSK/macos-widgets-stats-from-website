@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  DEBUG-only entitlements.
+
+	  Why this file exists:
+	    Sandboxed Debug builds re-trigger the macOS Sonoma+
+	    "MacosStatsWidget would like to access data from other apps"
+	    prompt (kTCCServiceSystemPolicyAppData) on every rebuild,
+	    because TCC's grant for that service is fragile across the
+	    re-signed/re-pathed binary that Xcode produces each build.
+
+	  Solution: app-sandbox=false ONLY in Debug. Release builds keep
+	  the full sandbox via MacosWidgetsStatsFromWebsite.entitlements.
+	  This file is wired to the Debug configuration via project.yml's
+	  configs.Debug override on the main app target.
+
+	  All other entitlements mirror the Release file so dev/prod
+	  behavior is otherwise identical (App Group, keychain, network).
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.ethansk.macos-widgets-stats-from-website</string>
+	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.ethansk.macos-widgets-stats-from-website</string>
+	</array>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

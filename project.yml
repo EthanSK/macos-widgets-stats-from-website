@@ -39,8 +39,16 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-widgets-stats-from-website
         INFOPLIST_FILE: MacosWidgetsStatsFromWebsite/Apps/MainApp/Info.plist
-        CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/MainApp/MacosWidgetsStatsFromWebsite.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        # Debug uses an unsandboxed entitlements file to avoid the macOS
+        # Sonoma+ kTCCServiceSystemPolicyAppData prompt ("would like to
+        # access data from other apps") re-firing on every rebuild. The
+        # release sandbox is unchanged.
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/MainApp/MacosWidgetsStatsFromWebsite.Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/MainApp/MacosWidgetsStatsFromWebsite.entitlements
     info:
       path: MacosWidgetsStatsFromWebsite/Apps/MainApp/Info.plist
       properties:
@@ -80,16 +88,12 @@ targets:
                 - selectorpack
               public.mime-type:
                 - application/vnd.macos-widgets-stats-from-website.selectorpack+json
-    entitlements:
-      path: MacosWidgetsStatsFromWebsite/Apps/MainApp/MacosWidgetsStatsFromWebsite.entitlements
-      properties:
-        com.apple.security.app-sandbox: true
-        com.apple.security.network.client: true
-        com.apple.security.files.user-selected.read-write: true
-        com.apple.security.application-groups:
-          - group.com.ethansk.macos-widgets-stats-from-website
-        keychain-access-groups:
-          - "$(AppIdentifierPrefix)com.ethansk.macos-widgets-stats-from-website"
+    # NOTE: No `entitlements:` block here — it would auto-generate the
+    # entitlements plist AND force CODE_SIGN_ENTITLEMENTS at the target
+    # level, defeating the per-config override above. The Debug and
+    # Release entitlements files are maintained on disk directly so the
+    # configs.Debug / configs.Release CODE_SIGN_ENTITLEMENTS settings
+    # actually take effect.
 
   MacosWidgetsStatsFromWebsiteWidget:
     type: app-extension
