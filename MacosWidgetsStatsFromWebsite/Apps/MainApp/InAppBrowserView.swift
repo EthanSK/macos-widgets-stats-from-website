@@ -393,7 +393,18 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
 
     private func isBenignNavigationCancellation(_ error: Error) -> Bool {
         let nsError = error as NSError
-        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+        // NSURLErrorCancelled (-999): we canceled the navigation ourselves, or the
+        // user clicked away mid-load. Not a real failure.
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+        // WebKitErrorDomain code 102 == WKErrorFrameLoadInterrupted: fired when
+        // a navigation is interrupted (e.g. by another navigation, or by us calling
+        // decisionHandler(.cancel)). Not a user-facing error.
+        if nsError.domain == "WebKitErrorDomain" && nsError.code == 102 {
+            return true
+        }
+        return false
     }
 
     private func installObservers() {
