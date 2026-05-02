@@ -421,11 +421,11 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     }
 
     private func shouldOpenExternallyForProviderCompatibility(_ url: URL) -> Bool {
-        guard let host = url.host?.lowercased() else {
-            return false
-        }
-
-        return isGoogleSignInHost(host)
+        // 2026-05-02: deflection retired now that the Phase-0 Safari UA-spoof (commit da26be2)
+        // flips Google's classifier from WebLiteSignIn to GlifWebSignIn. If Google tightens
+        // detection later, restore this gating.
+        _ = url
+        return false
     }
 
     private func isGoogleSignInHost(_ host: String) -> Bool {
