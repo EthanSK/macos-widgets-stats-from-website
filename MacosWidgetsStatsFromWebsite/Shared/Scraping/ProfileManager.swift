@@ -42,9 +42,38 @@ final class WebViewProfile {
 
     private init() {}
 
+    // FedCM-rejection polyfill: Google's OAuth consent page calls
+    // navigator.credentials.get({identity:...}) and stalls in WKWebView
+    // because FedCM isn't implemented. Force-rejecting the call lets
+    // Google fall back to its non-FedCM flow, which renders normally.
+    // If this works, the consent-URL deflection in InAppBrowserView.swift
+    // (commit eef38b1) becomes redundant.
+    private static let fedCMRejectionPolyfillSource = """
+    (function() {
+      try {
+        if (!location.hostname.endsWith('accounts.google.com')) return;
+        if (!navigator.credentials || typeof navigator.credentials.get !== 'function') return;
+        var origGet = navigator.credentials.get.bind(navigator.credentials);
+        navigator.credentials.get = function(options) {
+          if (options && options.identity) {
+            return Promise.reject(new DOMException('FedCM not supported', 'NotSupportedError'));
+          }
+          return origGet(options);
+        };
+      } catch (e) { /* swallow — never break the page */ }
+    })();
+    """
+
+    private static let fedCMRejectionPolyfillScript: WKUserScript = WKUserScript(
+        source: fedCMRejectionPolyfillSource,
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: true
+    )
+
     func makeConfiguration(userContentController: WKUserContentController = WKUserContentController()) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = websiteDataStore
+        userContentController.addUserScript(Self.fedCMRejectionPolyfillScript)
         configuration.userContentController = userContentController
 
         // Keep one shared process pool for the visible browser and future
