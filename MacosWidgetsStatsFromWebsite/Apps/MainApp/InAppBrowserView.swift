@@ -38,21 +38,6 @@ struct InAppBrowserView: View {
                     .padding(.horizontal, 10)
                     .padding(.bottom, 6)
             }
-            if let siteCompatibilityMessage = controller.siteCompatibilityMessage {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle")
-                    Text(siteCompatibilityMessage)
-                    Spacer()
-                    Button("Open in Browser") {
-                        controller.openCurrentURLInDefaultBrowser()
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 6)
-            }
             Divider()
             WebViewHost(webView: controller.webView)
         }
@@ -148,7 +133,6 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     @Published var isLoading = false
     @Published var isIdentifying = false
     @Published var inlineError: String?
-    @Published var siteCompatibilityMessage: String?
     @Published var preview: ElementCapturePreview?
 
     var currentURLForExternalOpen: URL? {
@@ -242,7 +226,6 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     func load(_ url: URL) {
         inlineError = nil
         urlText = url.absoluteString
-        updateSiteCompatibilityMessage(for: url)
         webView.load(URLRequest(url: url))
     }
 
@@ -289,7 +272,6 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         isLoading = false
         if let url = webView.url {
             urlText = url.absoluteString
-            updateSiteCompatibilityMessage(for: url)
         }
     }
 
@@ -330,20 +312,12 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
             return
         }
 
-        if shouldOpenExternallyForProviderCompatibility(url) {
-            siteCompatibilityMessage = "Google sign-in was opened in your default browser because Google blocks embedded app browsers. Finish the sign-in there, then return here; if the provider does not sync cookies back to this app, use a non-Google sign-in path for this tracker."
-            openExternalURL(url)
-            decisionHandler(.cancel)
-            return
-        }
-
         if navigationAction.targetFrame == nil {
             webView.load(navigationAction.request)
             decisionHandler(.cancel)
             return
         }
 
-        updateSiteCompatibilityMessage(for: url)
         decisionHandler(.allow)
     }
 
@@ -403,38 +377,6 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
         completionHandler(alert.runModal() == .alertFirstButtonReturn ? textField.stringValue : nil)
-    }
-
-    private func updateSiteCompatibilityMessage(for url: URL) {
-        guard let host = url.host?.lowercased() else {
-            siteCompatibilityMessage = nil
-            return
-        }
-
-        if isGoogleSignInHost(host) {
-            siteCompatibilityMessage = "Google sign-in cannot run inside this embedded browser, so the app opens it in your default browser instead of showing Google's unsupported embedded-browser error."
-        } else if host == "claude.ai" || host.hasSuffix(".claude.ai") || host == "anthropic.com" || host.hasSuffix(".anthropic.com") {
-            siteCompatibilityMessage = "Claude/Anthropic sign-in may reject embedded browsers or require OAuth/passkey steps in your default browser. Google sign-in is automatically handed off to your default browser to avoid Google's unsupported embedded-browser error."
-        } else {
-            siteCompatibilityMessage = nil
-        }
-    }
-
-    private func shouldOpenExternallyForProviderCompatibility(_ url: URL) -> Bool {
-        // 2026-05-02: deflection retired now that the Phase-0 Safari UA-spoof (commit da26be2)
-        // flips Google's classifier from WebLiteSignIn to GlifWebSignIn. If Google tightens
-        // detection later, restore this gating.
-        _ = url
-        return false
-    }
-
-    private func isGoogleSignInHost(_ host: String) -> Bool {
-        host == "accounts.google.com"
-            || host.hasSuffix(".accounts.google.com")
-            || host == "signin.google.com"
-            || host.hasSuffix(".signin.google.com")
-            || host == "accounts.youtube.com"
-            || host.hasSuffix(".accounts.youtube.com")
     }
 
     private func openExternalURL(_ url: URL) {
