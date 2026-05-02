@@ -45,15 +45,51 @@ final class WebViewProfile {
     func makeConfiguration(userContentController: WKUserContentController = WKUserContentController()) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = websiteDataStore
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
-        if #available(macOS 11.0, *) {
-            configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        }
+        configuration.userContentController = userContentController
+
         // Keep one shared process pool for the visible browser and future
         // headless scrapers. The typed API is deprecated on modern macOS, but
         // the Obj-C property remains available and is harmless where no-op.
         configuration.setValue(processPool, forKey: "processPool")
-        configuration.userContentController = userContentController
+
+        // === Phase-0 "make WKWebView feel like Safari" feature flags ===
+
+        // JavaScript: opening windows automatically (popups during OAuth flows etc.)
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+
+        // JavaScript: allow content scripts to run (the modern replacement for
+        // preferences.javaScriptEnabled, which has been deprecated since macOS 11).
+        if #available(macOS 11.0, *) {
+            configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        }
+
+        // Fraudulent / phishing site warning (Safe Browsing). On by default but
+        // make the intent explicit so a future config refactor can't silently
+        // drop user protection.
+        configuration.preferences.isFraudulentWebsiteWarningEnabled = true
+
+        // HTML5 fullscreen API (video sites, dashboards with fullscreen toggles).
+        if #available(macOS 12.3, *) {
+            configuration.preferences.isElementFullscreenEnabled = true
+        }
+
+        // Inline media playback (video plays in-place rather than punting to a
+        // standalone player). Already the macOS default but make it explicit.
+        configuration.allowsAirPlayForMediaPlayback = true
+
+        // Don't gate any media (audio/video) behind a user gesture — the
+        // user already opted-in by adding the tracker, and most dashboards
+        // autoplay charts/streams. Empty set = no media types require a tap.
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+
+        // Render incrementally as bytes arrive (faster perceived load).
+        configuration.suppressesIncrementalRendering = false
+
+        // Upgrades known-HTTP URLs to HTTPS where the host advertises it (HSTS-ish).
+        if #available(macOS 11.0, *) {
+            configuration.upgradeKnownHostsToHTTPS = true
+        }
+
         return configuration
     }
 
@@ -64,6 +100,27 @@ final class WebViewProfile {
         let webView = WKWebView(frame: frame, configuration: makeConfiguration(userContentController: userContentController))
         // Phase-0 UA-spoof for OAuth-blocking sites (Google etc.). Replace with bundled Chromium engine in Phase-1. See /tmp/widget-engine-research-2026-05-01.md.
         webView.customUserAgent = Self.safariUserAgent
+
+        // 3D Touch / force-touch link previews on the visible browser. No-op on
+        // headless scrapers since they're never user-interactive, but harmless.
+        webView.allowsLinkPreview = true
+
+        // Standard navigation gestures (back/forward swipe on trackpad). Useful
+        // in the visible InAppBrowserView; harmless when the view is offscreen.
+        webView.allowsBackForwardNavigationGestures = true
+
+        // Magnification gesture (pinch-to-zoom). On by default but make it explicit.
+        webView.allowsMagnification = true
+
+        // Web Inspector — Debug builds only. macOS 13.3+ requires opt-in via
+        // isInspectable; without this Safari's Develop menu can't attach.
+        // Skipped on Release so production users don't see "Inspect Element".
+        #if DEBUG
+        if #available(macOS 13.3, *) {
+            webView.isInspectable = true
+        }
+        #endif
+
         return webView
     }
 }
