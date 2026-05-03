@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         TrackerAttentionNotifier.shared.configure()
         UpdateController.shared.start()
         MCPServer.shared.startSocketServer()
+        bringAppToFrontOnLaunch()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -57,6 +58,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         NSApp.activate(ignoringOtherApps: true)
         AppNavigationEvents.openTrackerSettings(trackerID: trackerID)
+    }
+
+    private func bringAppToFrontOnLaunch() {
+        DispatchQueue.main.async {
+            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            NSApp.activate(ignoringOtherApps: true)
+
+            for window in NSApp.windows where window.canBecomeKey {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 }
 
