@@ -88,7 +88,7 @@ final class IdentifyElementCoordinator: NSObject, WKScriptMessageHandler {
         }
 
         isValidatingPick = true
-        webView.evaluateJavaScript(validationScript(for: selector)) { [weak self] result, error in
+        webView.evaluateJavaScript(SelectorExtractionJS.validationScript(for: selector)) { [weak self] result, error in
             DispatchQueue.main.async {
                 self?.handleValidationResult(result, error: error, originalPick: pick)
             }
@@ -101,7 +101,7 @@ final class IdentifyElementCoordinator: NSObject, WKScriptMessageHandler {
             return
         }
 
-        guard let validation = dictionary(from: result) else {
+        guard let validation = SelectorExtractionJS.dictionary(from: result) else {
             failAndRearm("The selector validation result was not readable.")
             return
         }
@@ -111,7 +111,7 @@ final class IdentifyElementCoordinator: NSObject, WKScriptMessageHandler {
             return
         }
 
-        let matchCount = intValue(validation["count"]) ?? 0
+        let matchCount = SelectorExtractionJS.intValue(validation["count"]) ?? 0
         guard matchCount == 1 else {
             failAndRearm("The selector matches \(matchCount) elements; choose a more specific element.")
             return
@@ -121,7 +121,7 @@ final class IdentifyElementCoordinator: NSObject, WKScriptMessageHandler {
         if let validatedText = validation["text"] as? String {
             finalPick.text = validatedText.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if let bbox = decodeBoundingBox(from: validation["bbox"]) {
+        if let bbox = SelectorExtractionJS.elementBoundingBox(from: validation["bbox"]) {
             finalPick.bbox = bbox
         }
 
@@ -144,18 +144,46 @@ final class IdentifyElementCoordinator: NSObject, WKScriptMessageHandler {
     }
 
     private func makePreview(for pick: ElementPick) {
-        guard let webView, let rect = snapshotRect(for: pick.bbox, in: webView) else {
+        guard let webView else {
             onPreviewReady(ElementCapturePreview(pick: pick, snapshot: nil))
             return
         }
 
-        let configuration = WKSnapshotConfiguration()
-        configuration.rect = rect
-        webView.takeSnapshot(with: configuration) { [weak self] image, _ in
+        webView.evaluateJavaScript(SelectorExtractionJS.snapshotRectScript(for: pick.selector, hideElements: [])) { [weak self] result, _ in
             DispatchQueue.main.async {
-                self?.onPreviewReady(ElementCapturePreview(pick: pick, snapshot: image))
+                guard let self else {
+                    return
+                }
+
+                let resolvedRect = SelectorExtractionJS.rect(from: result)
+                let fallbackRect = self.snapshotRect(for: pick.bbox, in: webView)
+                guard let rect = self.clampedSnapshotRect(resolvedRect ?? fallbackRect, in: webView) else {
+                    self.onPreviewReady(ElementCapturePreview(pick: pick, snapshot: nil))
+                    return
+                }
+
+                let configuration = WKSnapshotConfiguration()
+                configuration.rect = rect.integral
+                webView.takeSnapshot(with: configuration) { [weak self] image, _ in
+                    DispatchQueue.main.async {
+                        self?.onPreviewReady(ElementCapturePreview(pick: pick, snapshot: image))
+                    }
+                }
             }
         }
+    }
+
+    private func clampedSnapshotRect(_ rect: CGRect?, in webView: WKWebView) -> CGRect? {
+        guard let rect, rect.width > 0, rect.height > 0 else {
+            return nil
+        }
+
+        let clamped = rect.intersection(webView.bounds)
+        guard !clamped.isNull, clamped.width > 0, clamped.height > 0 else {
+            return nil
+        }
+
+        return clamped
     }
 
     private func snapshotRect(for bbox: ElementBoundingBox, in webView: WKWebView) -> CGRect? {
@@ -194,73 +222,9 @@ final class IdentifyElementCoordinator: NSObject, WKScriptMessageHandler {
         webView?.evaluateJavaScript("window.__statsWidgetInspectCleanup && window.__statsWidgetInspectCleanup();", completionHandler: nil)
     }
 
-    private func validationScript(for selector: String) -> String {
-        let selectorLiteral = javaScriptStringLiteral(selector)
-        return """
-        (() => {
-          const selector = \(selectorLiteral);
-          try {
-            const matches = document.querySelectorAll(selector);
-            const element = matches[0] || null;
-            const rect = element ? element.getBoundingClientRect() : null;
-            return {
-              count: matches.length,
-              text: element ? String(element.innerText || element.textContent || '').trim() : '',
-              bbox: rect ? {
-                x: rect.left,
-                y: rect.top,
-                width: rect.width,
-                height: rect.height,
-                viewportWidth: window.innerWidth,
-                viewportHeight: window.innerHeight,
-                devicePixelRatio: window.devicePixelRatio || 1
-              } : null
-            };
-          } catch (error) {
-            return {
-              count: -1,
-              error: String(error && error.message ? error.message : error)
-            };
-          }
-        })()
-        """
-    }
-
-    private func decodePick(from body: Any) -> ElementPick? {
-        guard let dictionary = dictionary(from: body),
-              let selector = dictionary["selector"] as? String,
-              let text = dictionary["text"] as? String,
-              let bbox = decodeBoundingBox(from: dictionary["bbox"]) else {
-            return nil
-        }
-
-        return ElementPick(selector: selector, text: text, bbox: bbox)
-    }
-
-    private func decodeBoundingBox(from value: Any?) -> ElementBoundingBox? {
-        guard let dictionary = dictionary(from: value),
-              let x = doubleValue(dictionary["x"]),
-              let y = doubleValue(dictionary["y"]),
-              let width = doubleValue(dictionary["width"]),
-              let height = doubleValue(dictionary["height"]),
-              let viewportWidth = doubleValue(dictionary["viewportWidth"]),
-              let viewportHeight = doubleValue(dictionary["viewportHeight"]) else {
-            return nil
-        }
-
-        return ElementBoundingBox(
-            x: x,
-            y: y,
-            width: width,
-            height: height,
-            viewportWidth: viewportWidth,
-            viewportHeight: viewportHeight,
-            devicePixelRatio: doubleValue(dictionary["devicePixelRatio"]) ?? 1
-        )
-    }
 
     private func errorMessage(from body: Any) -> String {
-        if let dictionary = dictionary(from: body), let message = dictionary["message"] as? String {
+        if let dictionary = SelectorExtractionJS.dictionary(from: body), let message = dictionary["message"] as? String {
             return message
         }
 
@@ -271,46 +235,15 @@ final class IdentifyElementCoordinator: NSObject, WKScriptMessageHandler {
         return "Identify Element reported an unknown error."
     }
 
-    private func dictionary(from value: Any?) -> [String: Any]? {
-        if let dictionary = value as? [String: Any] {
-            return dictionary
+    private func decodePick(from body: Any) -> ElementPick? {
+        guard let dictionary = SelectorExtractionJS.dictionary(from: body),
+              let selector = dictionary["selector"] as? String,
+              let text = dictionary["text"] as? String,
+              let bbox = SelectorExtractionJS.elementBoundingBox(from: dictionary["bbox"]) else {
+            return nil
         }
 
-        return value as? NSDictionary as? [String: Any]
+        return ElementPick(selector: selector, text: text, bbox: bbox)
     }
 
-    private func doubleValue(_ value: Any?) -> Double? {
-        if let value = value as? Double {
-            return value
-        }
-        if let value = value as? NSNumber {
-            return value.doubleValue
-        }
-        if let value = value as? String {
-            return Double(value)
-        }
-        return nil
-    }
-
-    private func intValue(_ value: Any?) -> Int? {
-        if let value = value as? Int {
-            return value
-        }
-        if let value = value as? NSNumber {
-            return value.intValue
-        }
-        if let value = value as? String {
-            return Int(value)
-        }
-        return nil
-    }
-
-    private func javaScriptStringLiteral(_ value: String) -> String {
-        guard let data = try? JSONEncoder().encode(value),
-              let literal = String(data: data, encoding: .utf8) else {
-            return "\"\""
-        }
-
-        return literal
-    }
 }

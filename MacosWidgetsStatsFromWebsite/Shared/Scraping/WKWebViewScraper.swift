@@ -79,11 +79,22 @@ final class WKWebViewScraper: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         timeout?.invalidate()
 
-        switch tracker.renderMode {
-        case .text:
-            scrapeText(in: webView)
-        case .snapshot:
-            scrapeSnapshot(in: webView)
+        SelectorRunner.waitForSelector(in: webView, selector: tracker.selector) { [weak self] result in
+            guard let self else {
+                return
+            }
+
+            switch result {
+            case .success(let status):
+                switch self.tracker.renderMode {
+                case .text:
+                    self.scrapeText(from: status)
+                case .snapshot:
+                    self.scrapeSnapshot(in: webView)
+                }
+            case .failure(let error):
+                self.finish(.failure(error))
+            }
         }
     }
 
@@ -95,45 +106,24 @@ final class WKWebViewScraper: NSObject, WKNavigationDelegate {
         finish(.failure(WKWebViewScraperError.navigationFailed(error.localizedDescription)))
     }
 
-    private func scrapeText(in webView: WKWebView) {
-        webView.evaluateJavaScript(textExtractionScript(for: tracker.selector)) { [weak self] result, error in
-            guard let self else {
-                return
-            }
-
-            if let error {
-                finish(.failure(error))
-                return
-            }
-
-            guard let dictionary = result as? [String: Any] else {
-                finish(.failure(WKWebViewScraperError.selectorDidNotMatch))
-                return
-            }
-
-            if let ok = dictionary["ok"] as? Bool, ok == false {
-                finish(.failure(WKWebViewScraperError.selectorDidNotMatch))
-                return
-            }
-
-            let value = (dictionary["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !value.isEmpty else {
-                finish(.failure(WKWebViewScraperError.selectedElementHasNoText))
-                return
-            }
-
-            let reading = TrackerReading(
-                currentValue: value,
-                currentNumeric: tracker.valueParser.parseNumeric(from: value),
-                lastUpdatedAt: Date(),
-                status: .ok
-            )
-            finish(.success(reading))
+    private func scrapeText(from status: [String: Any]) {
+        let value = (status["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            finish(.failure(WKWebViewScraperError.selectedElementHasNoText))
+            return
         }
+
+        let reading = TrackerReading(
+            currentValue: value,
+            currentNumeric: tracker.valueParser.parseNumeric(from: value),
+            lastUpdatedAt: Date(),
+            status: .ok
+        )
+        finish(.success(reading))
     }
 
     private func scrapeSnapshot(in webView: WKWebView) {
-        webView.evaluateJavaScript(snapshotRectScript(for: tracker.selector, hideElements: tracker.hideElements)) { [weak self] result, error in
+        webView.evaluateJavaScript(SelectorExtractionJS.snapshotRectScript(for: tracker.selector, hideElements: tracker.hideElements)) { [weak self] result, error in
             guard let self else {
                 return
             }
@@ -143,7 +133,7 @@ final class WKWebViewScraper: NSObject, WKNavigationDelegate {
                 return
             }
 
-            let resolvedRect = rect(from: result)
+            let resolvedRect = SelectorExtractionJS.rect(from: result)
             let fallbackRect = tracker.elementBoundingBox.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
             guard let rect = resolvedRect ?? fallbackRect,
                   rect.width > 0,
@@ -152,36 +142,46 @@ final class WKWebViewScraper: NSObject, WKNavigationDelegate {
                 return
             }
 
-            let configuration = WKSnapshotConfiguration()
-            configuration.rect = rect.integral
-            webView.takeSnapshot(with: configuration) { [weak self] image, error in
-                guard let self else {
-                    return
-                }
+            takeSnapshot(of: rect, in: webView)
+        }
+    }
 
-                if let error {
-                    finish(.failure(error))
-                    return
-                }
+    private func takeSnapshot(of rect: CGRect, in webView: WKWebView) {
+        let clampedRect = rect.intersection(webView.bounds)
+        guard !clampedRect.isNull, clampedRect.width > 0, clampedRect.height > 0 else {
+            finish(.failure(WKWebViewScraperError.selectedElementHasNoVisibleRect))
+            return
+        }
 
-                guard let image, let data = pngData(from: image) else {
-                    finish(.failure(WKWebViewScraperError.snapshotEncodingFailed))
-                    return
-                }
+        let configuration = WKSnapshotConfiguration()
+        configuration.rect = clampedRect.integral
+        webView.takeSnapshot(with: configuration) { [weak self] image, error in
+            guard let self else {
+                return
+            }
 
-                do {
-                    let cacheKey = try SnapshotSharedCache.shared.store(data, for: tracker.id)
-                    let now = Date()
-                    let reading = TrackerReading(
-                        snapshotCacheKey: cacheKey,
-                        snapshotCapturedAt: now,
-                        lastUpdatedAt: now,
-                        status: .ok
-                    )
-                    finish(.success(reading))
-                } catch {
-                    finish(.failure(error))
-                }
+            if let error {
+                finish(.failure(error))
+                return
+            }
+
+            guard let image, let data = pngData(from: image) else {
+                finish(.failure(WKWebViewScraperError.snapshotEncodingFailed))
+                return
+            }
+
+            do {
+                let cacheKey = try SnapshotSharedCache.shared.store(data, for: tracker.id)
+                let now = Date()
+                let reading = TrackerReading(
+                    snapshotCacheKey: cacheKey,
+                    snapshotCapturedAt: now,
+                    lastUpdatedAt: now,
+                    status: .ok
+                )
+                finish(.success(reading))
+            } catch {
+                finish(.failure(error))
             }
         }
     }
@@ -223,62 +223,6 @@ final class WKWebViewScraper: NSObject, WKNavigationDelegate {
         return CGRect(x: 0, y: 0, width: 1280, height: 800)
     }
 
-    private func textExtractionScript(for selector: String) -> String {
-        let selectorLiteral = javaScriptStringLiteral(selector)
-        return """
-        (() => {
-          const element = document.querySelector(\(selectorLiteral));
-          if (!element) {
-            return { ok: false };
-          }
-          return {
-            ok: true,
-            text: String(element.innerText || element.textContent || '').trim()
-          };
-        })()
-        """
-    }
-
-    private func snapshotRectScript(for selector: String, hideElements: [String]) -> String {
-        let selectorLiteral = javaScriptStringLiteral(selector)
-        let hideElementsLiteral = javaScriptArrayLiteral(hideElements)
-        return """
-        (() => {
-          for (const selector of \(hideElementsLiteral)) {
-            try {
-              document.querySelectorAll(selector).forEach(element => {
-                element.setAttribute('data-stats-widget-hidden', 'true');
-                element.style.visibility = 'hidden';
-              });
-            } catch (_) {}
-          }
-          const element = document.querySelector(\(selectorLiteral));
-          if (!element) {
-            return null;
-          }
-          const rect = element.getBoundingClientRect();
-          return {
-            x: rect.left,
-            y: rect.top,
-            width: rect.width,
-            height: rect.height
-          };
-        })()
-        """
-    }
-
-    private func rect(from value: Any?) -> CGRect? {
-        guard let dictionary = value as? [String: Any],
-              let x = doubleValue(dictionary["x"]),
-              let y = doubleValue(dictionary["y"]),
-              let width = doubleValue(dictionary["width"]),
-              let height = doubleValue(dictionary["height"]) else {
-            return nil
-        }
-
-        return CGRect(x: x, y: y, width: width, height: height)
-    }
-
     private func pngData(from image: NSImage) -> Data? {
         guard let tiffData = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData) else {
@@ -288,34 +232,4 @@ final class WKWebViewScraper: NSObject, WKNavigationDelegate {
         return bitmap.representation(using: .png, properties: [:])
     }
 
-    private func doubleValue(_ value: Any?) -> Double? {
-        if let value = value as? Double {
-            return value
-        }
-        if let value = value as? NSNumber {
-            return value.doubleValue
-        }
-        if let value = value as? String {
-            return Double(value)
-        }
-        return nil
-    }
-
-    private func javaScriptStringLiteral(_ value: String) -> String {
-        guard let data = try? JSONEncoder().encode(value),
-              let literal = String(data: data, encoding: .utf8) else {
-            return "\"\""
-        }
-
-        return literal
-    }
-
-    private func javaScriptArrayLiteral(_ value: [String]) -> String {
-        guard let data = try? JSONEncoder().encode(value),
-              let literal = String(data: data, encoding: .utf8) else {
-            return "[]"
-        }
-
-        return literal
-    }
 }

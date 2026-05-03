@@ -85,8 +85,8 @@ final class BackgroundScheduler: ObservableObject {
     }
 
     private func scrape(_ tracker: Tracker, completion: (() -> Void)? = nil) {
-        WKWebViewScraper.scrape(tracker: tracker) { result in
-            self.record(result: result, for: tracker)
+        WKWebViewScraper.scrape(tracker: tracker) { [weak self] result in
+            self?.record(result: result, for: tracker)
             completion?()
         }
     }

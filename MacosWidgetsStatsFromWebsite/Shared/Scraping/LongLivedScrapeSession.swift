@@ -220,9 +220,20 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loadTimeout?.invalidate()
-        isLoaded = true
-        scheduleTimers()
-        snapshotNow()
+        SelectorRunner.waitForSelector(in: webView, selector: tracker.selector) { [weak self] result in
+            guard let self else {
+                return
+            }
+
+            switch result {
+            case .success:
+                self.isLoaded = true
+                self.scheduleTimers()
+                self.snapshotNow()
+            case .failure(let error):
+                self.fail(error)
+            }
+        }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -292,7 +303,7 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
     }
 
     private func resolveRect(in webView: WKWebView) {
-        webView.evaluateJavaScript(snapshotRectScript(for: tracker.selector, hideElements: tracker.hideElements)) { [weak self] result, error in
+        webView.evaluateJavaScript(SelectorExtractionJS.snapshotRectScript(for: tracker.selector, hideElements: tracker.hideElements)) { [weak self] result, error in
             DispatchQueue.main.async {
                 guard let self else {
                     return
@@ -303,7 +314,7 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
                     return
                 }
 
-                guard let rect = self.rect(from: result),
+                guard let rect = SelectorExtractionJS.rect(from: result),
                       rect.width > 0,
                       rect.height > 0 else {
                     self.finishSnapshotFailure(WKWebViewScraperError.selectedElementHasNoVisibleRect)
@@ -397,44 +408,13 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
         return CGRect(x: 0, y: 0, width: 1280, height: 800)
     }
 
-    private func snapshotRectScript(for selector: String, hideElements: [String]) -> String {
-        let selectorLiteral = javaScriptStringLiteral(selector)
-        let hideElementsLiteral = javaScriptArrayLiteral(hideElements)
-        return """
-        (() => {
-          for (const selector of \(hideElementsLiteral)) {
-            try {
-              document.querySelectorAll(selector).forEach(element => {
-                element.setAttribute('data-stats-widget-hidden', 'true');
-                element.style.visibility = 'hidden';
-              });
-            } catch (_) {}
-          }
-          const element = document.querySelector(\(selectorLiteral));
-          if (!element) {
-            return null;
-          }
-          const rect = element.getBoundingClientRect();
-          return {
-            x: rect.left,
-            y: rect.top,
-            width: rect.width,
-            height: rect.height
-          };
-        })()
-        """
-    }
 
-    private func rect(from value: Any?) -> CGRect? {
-        guard let dictionary = value as? [String: Any],
-              let x = doubleValue(dictionary["x"]),
-              let y = doubleValue(dictionary["y"]),
-              let width = doubleValue(dictionary["width"]),
-              let height = doubleValue(dictionary["height"]) else {
-            return nil
+    private func runOnMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.async(execute: work)
         }
-
-        return CGRect(x: x, y: y, width: width, height: height)
     }
 
     private func pngData(from image: NSImage) -> Data? {
@@ -446,42 +426,4 @@ final class LongLivedScrapeSession: NSObject, WKNavigationDelegate {
         return bitmap.representation(using: .png, properties: [:])
     }
 
-    private func doubleValue(_ value: Any?) -> Double? {
-        if let value = value as? Double {
-            return value
-        }
-        if let value = value as? NSNumber {
-            return value.doubleValue
-        }
-        if let value = value as? String {
-            return Double(value)
-        }
-        return nil
-    }
-
-    private func javaScriptStringLiteral(_ value: String) -> String {
-        guard let data = try? JSONEncoder().encode(value),
-              let literal = String(data: data, encoding: .utf8) else {
-            return "\"\""
-        }
-
-        return literal
-    }
-
-    private func javaScriptArrayLiteral(_ value: [String]) -> String {
-        guard let data = try? JSONEncoder().encode(value),
-              let literal = String(data: data, encoding: .utf8) else {
-            return "[]"
-        }
-
-        return literal
-    }
-
-    private func runOnMain(_ work: @escaping () -> Void) {
-        if Thread.isMainThread {
-            work()
-        } else {
-            DispatchQueue.main.async(execute: work)
-        }
-    }
 }

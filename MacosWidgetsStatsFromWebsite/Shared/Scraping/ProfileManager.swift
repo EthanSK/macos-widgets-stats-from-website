@@ -16,7 +16,7 @@ final class WebViewProfile {
     // is the backing identifier for the "macos-widgets-stats-from-website" browser profile.
     private static let dataStoreIdentifier = UUID(uuidString: "7d8f7d6c-829b-4f6d-9c13-0e8a6e8f9e44")!
 
-    // Phase-0 UA-spoof for OAuth-blocking sites (Google etc.). Replace with bundled Chromium engine in Phase-1. See /tmp/widget-engine-research-2026-05-01.md.
+    // Safari UA-spoof for OAuth-blocking sites (Google etc.).
     // String matches current-stable Safari 17.5 on macOS 14.5 (Sonoma). Empirically flips Google's
     // OAuth flow classification from `flowName=GeneralOAuthLite` (restricted) to
     // `flowName=GeneralOAuthFlow` (full), matching what real Safari receives.
@@ -42,64 +42,96 @@ final class WebViewProfile {
 
     private init() {}
 
-    // FedCM-rejection shim: Google's OAuth consent page can call
+    // FedCM-rejection shim: Google's OAuth flow can call
     // navigator.credentials.get({ identity: ... }) and stall in WKWebView
-    // because FedCM is incomplete there. The native method may also be
-    // installed/restored after atDocumentStart, so keep re-applying the
-    // shim briefly and inject it into Google-owned frames too.
+    // because FedCM is incomplete there. That call is not guaranteed to run
+    // from accounts.google.com; relying-party pages can invoke Google Identity
+    // Services before the browser reaches a Google-owned frame. Install the
+    // shim globally, but only reject FedCM/federated requests so password and
+    // passkey credentials keep using WebKit's native implementation.
+    // The native method may also be installed/restored after atDocumentStart,
+    // so keep re-applying the shim briefly.
     // This is best-effort only; InAppBrowserView still has a narrow external
     // deflection for the known-broken consent route.
     private static let fedCMRejectionPolyfillSource = """
     (function() {
       try {
-        if (!/(^|\\.)accounts\\.google\\.com$/i.test(location.hostname)) return;
-
         var originalGet = null;
         var attempts = 0;
         var timer = null;
 
+        function isShim(fn) {
+          return !!(fn && fn.__statsWidgetFedCMShim === true);
+        }
+
+        function credentialsPrototype() {
+          try {
+            if (window.CredentialsContainer && window.CredentialsContainer.prototype) {
+              return window.CredentialsContainer.prototype;
+            }
+          } catch (_) {}
+          return null;
+        }
+
         function shouldRejectFedCM(options) {
-          return !!(options && (options.identity || options.federated));
+          return !!(options && (Object.prototype.hasOwnProperty.call(options, 'identity') || options.identity || options.federated));
         }
 
         function rejected(message) {
           return Promise.reject(new DOMException(message || 'FedCM not supported in WKWebView', 'NotSupportedError'));
         }
 
-        function install() {
-          attempts += 1;
-          var credentials = navigator.credentials;
-          if (!credentials || typeof credentials.get !== 'function') return;
+        function rememberOriginal(fn) {
+          if (!originalGet && typeof fn === 'function' && !isShim(fn)) {
+            originalGet = fn;
+          }
+        }
 
-          if (!originalGet && !credentials.__statsWidgetFedCMOriginalGet) {
-            originalGet = credentials.get.bind(credentials);
-            try {
-              Object.defineProperty(credentials, '__statsWidgetFedCMOriginalGet', {
-                value: originalGet,
-                configurable: true
-              });
-            } catch (_) {}
-          } else if (!originalGet && credentials.__statsWidgetFedCMOriginalGet) {
-            originalGet = credentials.__statsWidgetFedCMOriginalGet;
+        function shimmedGet(options) {
+          if (shouldRejectFedCM(options)) {
+            return rejected('FedCM not supported in WKWebView');
           }
 
-          var shimmedGet = function(options) {
-            if (shouldRejectFedCM(options)) {
-              return rejected('FedCM not supported in WKWebView');
-            }
-            return originalGet ? originalGet(options) : rejected('Credentials API unavailable');
-          };
+          if (!originalGet) {
+            var credentials = navigator.credentials;
+            var proto = credentialsPrototype();
+            rememberOriginal(proto && proto.get);
+            rememberOriginal(credentials && credentials.get);
+          }
+
+          return originalGet ? originalGet.call(navigator.credentials, options) : rejected('Credentials API unavailable');
+        }
+
+        try {
+          Object.defineProperty(shimmedGet, '__statsWidgetFedCMShim', {
+            value: true,
+            configurable: false
+          });
+        } catch (_) {}
+
+        function installOn(target) {
+          if (!target) return;
+          rememberOriginal(target.get);
+          if (isShim(target.get)) return;
 
           try {
-            Object.defineProperty(credentials, 'get', {
+            Object.defineProperty(target, 'get', {
               value: shimmedGet,
               configurable: true,
               enumerable: true,
               writable: true
             });
           } catch (_) {
-            try { credentials.get = shimmedGet; } catch (_) {}
+            try { target.get = shimmedGet; } catch (_) {}
           }
+        }
+
+        function install() {
+          attempts += 1;
+          var credentials = navigator.credentials;
+          var proto = credentialsPrototype();
+          installOn(proto);
+          installOn(credentials);
 
           if (attempts > 400 && timer) {
             clearInterval(timer);
@@ -185,12 +217,12 @@ final class WebViewProfile {
         return configuration
     }
 
-    /// Build a `WKWebView` with the shared profile configuration and the Phase-0
+    /// Build a `WKWebView` with the shared profile configuration and the
     /// Safari UA-spoof pre-applied. Always prefer this over constructing
     /// `WKWebView` directly so every visible/headless browser inherits the spoof.
     func makeWebView(frame: CGRect, userContentController: WKUserContentController = WKUserContentController()) -> WKWebView {
         let webView = WKWebView(frame: frame, configuration: makeConfiguration(userContentController: userContentController))
-        // Phase-0 UA-spoof for OAuth-blocking sites (Google etc.). Replace with bundled Chromium engine in Phase-1. See /tmp/widget-engine-research-2026-05-01.md.
+        // Safari UA-spoof for OAuth-blocking sites (Google etc.).
         webView.customUserAgent = Self.safariUserAgent
 
         // 3D Touch / force-touch link previews on the visible browser. No-op on
