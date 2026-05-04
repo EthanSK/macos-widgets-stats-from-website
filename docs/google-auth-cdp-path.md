@@ -23,29 +23,27 @@ time trying to make Google OAuth reliable inside `WKWebView`.
 - `ChromeCDPClient` intentionally avoids `Runtime.enable` and uses
   `Runtime.evaluate` directly for selector extraction, matching the safer
   Google-login-compatible control style.
-- The remaining weak link is element selection: `Identify Element` still runs
-  through `InAppBrowserView` + `IdentifyElementCoordinator`, which are
-  `WKWebView`-based. The UI can open the same page in the CDP browser, but it
-  does not yet attach a picker to that Chrome target.
+- Element selection now has a bounded Chrome/CDP path from the visible browser:
+  `Identify in CDP Browser` opens the page in the persistent profile, injects
+  the existing picker into that CDP target, polls `window.__statsWidgetPicked`,
+  validates the selector over CDP, and returns the same preview/save payload as
+  the `WKWebView` picker.
 
 ## Safest next implementation path
 
 1. Make Chrome/CDP the primary sign-in and scraping path for Google-authenticated
    trackers. Avoid new `WKWebView` OAuth workarounds.
-2. Port `Identify Element` to CDP before doing more Google-specific UI work.
-   Prefer one of these approaches, in order:
-   - Inject a picker script into the selected Chrome target, reuse the existing
-     selector synthesis logic, store the clicked payload on `window`, and poll
-     it with `Runtime.evaluate` so no full `Runtime.enable` event stream is
-     required.
-   - For a deeper native inspector later, use CDP DOM/Overlay calls such as
-     `DOM.getNodeForLocation`, `Overlay.highlightNode`, and
-     `DOM.describeNode`/attributes. That needs event handling in
-     `ChromeCDPClient`, so keep it as the second step rather than the first.
-3. Once CDP Identify Element exists, route Google-account pages directly through
-   the Chrome profile: open target → user signs in/picks element → validate
-   selector via CDP → save tracker with the existing `browserProfile`.
-4. Keep `WKWebView` available for non-Google/local pages where a bundled system
+2. Keep the current CDP Identify path intentionally small: inject the picker
+   script, store the clicked payload on `window`, and poll it with
+   `Runtime.evaluate` so no full `Runtime.enable` event stream is required.
+3. For a deeper native inspector later, use CDP DOM/Overlay calls such as
+   `DOM.getNodeForLocation`, `Overlay.highlightNode`, and
+   `DOM.describeNode`/attributes. That needs event handling in
+   `ChromeCDPClient`, so keep it as a later iteration.
+4. Route Google-account pages through the Chrome profile: open/sign in in CDP
+   browser → use `Identify in CDP Browser` → validate selector via CDP → save
+   tracker with the existing `browserProfile`.
+5. Keep `WKWebView` available for non-Google/local pages where a bundled system
    browser is valuable and App Store constraints matter.
 
 ## Small groundwork already applied
@@ -53,5 +51,5 @@ time trying to make Google OAuth reliable inside `WKWebView`.
 `InspectOverlayJS` now has a non-WebKit fallback: when no
 `webkit.messageHandlers` bridge exists, successful picks are stored on
 `window.__statsWidgetPicked` and errors on `window.__statsWidgetInspectError`.
-That preserves the current WKWebView behavior while making the existing picker
-script reusable by a future CDP polling coordinator.
+The script clears those fallback globals at startup so CDP polling cannot read a
+stale pick from a previous identify session.

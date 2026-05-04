@@ -13,6 +13,10 @@ enum InspectOverlayJS {
       window.__statsWidgetInspectCleanup();
     }
 
+    window.__statsWidgetPicked = null;
+    window.__statsWidgetInspectError = null;
+    window.__statsWidgetInspectCanceled = false;
+
     const root = document.body || document.documentElement;
     if (!root) {
       throw new Error('No document root is available.');
