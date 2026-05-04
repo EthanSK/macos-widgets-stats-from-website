@@ -166,6 +166,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     private let identifyCoordinator: IdentifyElementCoordinator
     private var chromeIdentifyCoordinator: ChromeIdentifyElementCoordinator?
     private var activeIdentifyMode: IdentifyMode?
+    private var lastProfileBrowserTargetID: String?
     private var observations: [NSKeyValueObservation] = []
 
     init(initialURL: URL?, renderMode: RenderMode) {
@@ -353,7 +354,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
             }
         )
         chromeIdentifyCoordinator = coordinator
-        coordinator.start(url: url)
+        coordinator.start(url: url, preferredTargetID: lastProfileBrowserTargetID)
     }
 
     func cancelIdentifying() {
@@ -549,10 +550,13 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
             return
         }
 
-        ChromeBrowserProfile.shared.openVisibleBrowser(url: url) { [weak self] result in
+        ChromeBrowserProfile.shared.openVisibleBrowserTarget(url: ChromeBrowserProfile.safeInitialURL(for: url)) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
-                case .success:
+                case .success(let target):
+                    if let target {
+                        self?.lastProfileBrowserTargetID = target.id
+                    }
                     self?.inlineError = nil
                     self?.inlineNotice = successNotice ?? "Opened in the app's persistent Chrome/Chromium CDP browser profile."
                 case .failure(let error):
@@ -725,11 +729,11 @@ private final class ChromeIdentifyElementCoordinator {
         self.onCancelled = onCancelled
     }
 
-    func start(url: URL) {
+    func start(url: URL, preferredTargetID: String? = nil) {
         armTimeout()
         ChromeBrowserProfile.shared.ensureLaunched(profileName: Tracker.defaultBrowserProfile, foreground: true) { [weak self] result in
             DispatchQueue.main.async {
-                self?.handleBrowserLaunch(result, url: url)
+                self?.handleBrowserLaunch(result, url: url, preferredTargetID: preferredTargetID)
             }
         }
     }
@@ -745,18 +749,47 @@ private final class ChromeIdentifyElementCoordinator {
         onCancelled()
     }
 
-    private func handleBrowserLaunch(_ result: Result<ChromeBrowserLaunchConfiguration, Error>, url: URL) {
+    private func handleBrowserLaunch(
+        _ result: Result<ChromeBrowserLaunchConfiguration, Error>,
+        url: URL,
+        preferredTargetID: String?
+    ) {
         guard !didComplete else { return }
 
         switch result {
         case .success(let configuration):
-            ChromeBrowserProfile.shared.openTab(url: url, configuration: configuration) { [weak self] result in
+            ChromeBrowserProfile.shared.bestExistingPageTarget(
+                preferredTargetID: preferredTargetID,
+                matching: url,
+                configuration: configuration
+            ) { [weak self] existingResult in
                 DispatchQueue.main.async {
-                    self?.handleTarget(result)
+                    self?.handleExistingTargetLookup(existingResult, configuration: configuration, fallbackURL: url)
                 }
             }
         case .failure(let error):
             finishWithError(error.localizedDescription)
+        }
+    }
+
+    private func handleExistingTargetLookup(
+        _ result: Result<ChromeBrowserTarget, Error>,
+        configuration: ChromeBrowserLaunchConfiguration,
+        fallbackURL: URL
+    ) {
+        guard !didComplete else { return }
+
+        switch result {
+        case .success(let target):
+            onNotice("Reusing the existing CDP browser tab so the logged-in profile/session is preserved.")
+            handleTarget(.success(target))
+        case .failure:
+            let safeURL = ChromeBrowserProfile.safeInitialURL(for: fallbackURL)
+            ChromeBrowserProfile.shared.openTab(url: safeURL, configuration: configuration) { [weak self] result in
+                DispatchQueue.main.async {
+                    self?.handleTarget(result)
+                }
+            }
         }
     }
 

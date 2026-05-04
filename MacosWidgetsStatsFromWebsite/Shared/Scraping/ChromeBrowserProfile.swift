@@ -20,9 +20,17 @@ struct ChromeBrowserTarget: Equatable {
     let webSocketDebuggerURL: URL
 }
 
+struct ChromeBrowserPageTarget: Equatable {
+    let id: String
+    let url: URL?
+    let title: String
+    let webSocketDebuggerURL: URL
+}
+
 enum ChromeBrowserProfileError: LocalizedError {
     case browserNotFound
     case launchFailed(String)
+    case downloadFailed(String)
     case cdpNotReachable(Int)
     case targetCreationFailed(String)
     case invalidCDPResponse
@@ -30,9 +38,11 @@ enum ChromeBrowserProfileError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .browserNotFound:
-            return "No Chromium-based browser was found. Install Google Chrome/Chromium or set MACOS_WIDGETS_STATS_CHROME_PATH."
+            return "No Chromium-based browser was found. Bundle Chrome for Testing, install Google Chrome/Chromium, or set MACOS_WIDGETS_STATS_CHROME_PATH."
         case .launchFailed(let message):
             return "Could not launch the browser profile: \(message)"
+        case .downloadFailed(let message):
+            return "Could not download Chrome for Testing: \(message)"
         case .cdpNotReachable(let port):
             return "Chrome DevTools Protocol did not become reachable on port \(port)."
         case .targetCreationFailed(let message):
@@ -48,6 +58,7 @@ final class ChromeBrowserProfile {
     static let defaultProfileName = Tracker.defaultBrowserProfile
 
     private let baseCDPPort = 18880
+    private let chromeForTestingManifestURL = URL(string: "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json")!
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(label: "ChromeBrowserProfile")
     private var launchedProcess: Process?
@@ -73,16 +84,26 @@ final class ChromeBrowserProfile {
         profileName: String = ChromeBrowserProfile.defaultProfileName,
         completion: ((Result<Void, Error>) -> Void)? = nil
     ) {
+        openVisibleBrowserTarget(url: url, profileName: profileName) { result in
+            completion?(result.map { _ in () })
+        }
+    }
+
+    func openVisibleBrowserTarget(
+        url: URL?,
+        profileName: String = ChromeBrowserProfile.defaultProfileName,
+        completion: ((Result<ChromeBrowserTarget?, Error>) -> Void)? = nil
+    ) {
         ensureLaunched(profileName: profileName, foreground: true) { [weak self] result in
             switch result {
             case .success(let configuration):
                 guard let url else {
-                    completion?(.success(()))
+                    completion?(.success(nil))
                     return
                 }
 
                 self?.openTab(url: url, configuration: configuration) { tabResult in
-                    completion?(tabResult.map { _ in () })
+                    completion?(tabResult.map { Optional($0) })
                 }
             case .failure(let error):
                 completion?(.failure(error))
@@ -141,6 +162,52 @@ final class ChromeBrowserProfile {
         }
 
         URLSession.shared.dataTask(with: url).resume()
+    }
+
+    func bestExistingPageTarget(
+        preferredTargetID: String?,
+        matching url: URL,
+        configuration: ChromeBrowserLaunchConfiguration,
+        completion: @escaping (Result<ChromeBrowserTarget, Error>) -> Void
+    ) {
+        listPageTargets(configuration: configuration) { result in
+            switch result {
+            case .success(let targets):
+                if let preferredTargetID,
+                   let preferred = targets.first(where: { $0.id == preferredTargetID }) {
+                    completion(.success(preferred.asTarget))
+                    return
+                }
+
+                let requestedHost = url.host?.lowercased()
+                let safeHostMatches = targets.filter { target in
+                    guard let targetURL = target.url,
+                          targetURL.host?.lowercased() == requestedHost,
+                          !Self.isLikelyLogoutURL(targetURL) else {
+                        return false
+                    }
+                    return true
+                }
+
+                if let match = safeHostMatches.first {
+                    completion(.success(match.asTarget))
+                    return
+                }
+
+                let usableTargets = targets.filter { target in
+                    guard let targetURL = target.url else { return false }
+                    return Self.isUsableExistingPageURL(targetURL)
+                }
+                if usableTargets.count == 1, let onlyTarget = usableTargets.first {
+                    completion(.success(onlyTarget.asTarget))
+                    return
+                }
+
+                completion(.failure(ChromeBrowserProfileError.targetCreationFailed("No existing CDP browser tab matched the page to identify.")))
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
     }
 
     private func buildChromeLaunchArguments(configuration: ChromeBrowserLaunchConfiguration) -> [String] {
@@ -254,6 +321,85 @@ final class ChromeBrowserProfile {
         }.resume()
     }
 
+    private func listPageTargets(
+        configuration: ChromeBrowserLaunchConfiguration,
+        completion: @escaping (Result<[ChromeBrowserPageTarget], Error>) -> Void
+    ) {
+        guard let url = URL(string: "/json/list", relativeTo: configuration.cdpURL)?.absoluteURL else {
+            completion(.failure(ChromeBrowserProfileError.invalidCDPResponse))
+            return
+        }
+
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            if let error {
+                completion(.failure(error))
+                return
+            }
+
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200..<300).contains(httpResponse.statusCode) {
+                completion(.failure(ChromeBrowserProfileError.targetCreationFailed("CDP /json/list returned HTTP \(httpResponse.statusCode).")))
+                return
+            }
+
+            guard let data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                completion(.failure(ChromeBrowserProfileError.invalidCDPResponse))
+                return
+            }
+
+            let targets = json.compactMap { item -> ChromeBrowserPageTarget? in
+                guard (item["type"] as? String) == "page",
+                      let id = item["id"] as? String,
+                      let webSocketString = item["webSocketDebuggerUrl"] as? String,
+                      let webSocketURL = URL(string: webSocketString) else {
+                    return nil
+                }
+
+                let url = (item["url"] as? String).flatMap(URL.init(string:))
+                let title = item["title"] as? String ?? ""
+                return ChromeBrowserPageTarget(id: id, url: url, title: title, webSocketDebuggerURL: webSocketURL)
+            }
+
+            completion(.success(targets))
+        }.resume()
+    }
+
+    static func safeInitialURL(for url: URL) -> URL {
+        guard isLikelyLogoutURL(url),
+              let scheme = url.scheme,
+              let host = url.host else {
+            return url
+        }
+
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host
+        components.port = url.port
+        components.path = "/"
+        return components.url ?? url
+    }
+
+    static func isLikelyLogoutURL(_ url: URL) -> Bool {
+        let path = url.path.lowercased()
+        let query = url.query?.lowercased() ?? ""
+        return path.contains("logout")
+            || path.contains("log-out")
+            || path.contains("signout")
+            || path.contains("sign-out")
+            || query.contains("logout")
+            || query.contains("signout")
+    }
+
+    private static func isUsableExistingPageURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host?.isEmpty == false else {
+            return false
+        }
+        return !isLikelyLogoutURL(url)
+    }
+
     private func resolveBrowser() throws -> ResolvedBrowser {
         if let override = ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_CHROME_PATH"]?.nilIfEmpty {
             if let browser = ResolvedBrowser(path: override) {
@@ -262,10 +408,14 @@ final class ChromeBrowserProfile {
             throw ChromeBrowserProfileError.launchFailed("MACOS_WIDGETS_STATS_CHROME_PATH does not point at an app bundle or executable browser.")
         }
 
-        for url in bundledBrowserCandidates() + systemBrowserCandidates() {
+        for url in bundledBrowserCandidates() + managedBrowserCandidates() + systemBrowserCandidates() {
             if let browser = ResolvedBrowser(url: url) {
                 return browser
             }
+        }
+
+        if autoDownloadChromeForTestingEnabled {
+            return try downloadChromeForTesting()
         }
 
         throw ChromeBrowserProfileError.browserNotFound
@@ -280,6 +430,10 @@ final class ChromeBrowserProfile {
         ]
     }
 
+    private func managedBrowserCandidates() -> [URL] {
+        [managedChromeForTestingAppURL]
+    }
+
     private func systemBrowserCandidates() -> [URL] {
         [
             URL(fileURLWithPath: "/Applications/Google Chrome.app", isDirectory: true),
@@ -292,6 +446,185 @@ final class ChromeBrowserProfile {
             URL(fileURLWithPath: "/usr/bin/chromium", isDirectory: false),
             URL(fileURLWithPath: "/usr/bin/google-chrome", isDirectory: false)
         ]
+    }
+
+    private var autoDownloadChromeForTestingEnabled: Bool {
+        let value = ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_DISABLE_CHROME_DOWNLOAD"]?.lowercased()
+        return value != "1" && value != "true" && value != "yes"
+    }
+
+    private var chromeForTestingPlatform: String {
+        #if arch(arm64)
+        return "mac-arm64"
+        #else
+        return "mac-x64"
+        #endif
+    }
+
+    private var managedChromeForTestingRootURL: URL {
+        AppGroupPaths.canonicalApplicationSupportURL()
+            .appendingPathComponent("Browser", isDirectory: true)
+            .appendingPathComponent("ChromeForTesting", isDirectory: true)
+            .appendingPathComponent(chromeForTestingPlatform, isDirectory: true)
+    }
+
+    private var managedChromeForTestingAppURL: URL {
+        managedChromeForTestingRootURL.appendingPathComponent("Google Chrome for Testing.app", isDirectory: true)
+    }
+
+    private func downloadChromeForTesting() throws -> ResolvedBrowser {
+        if let existing = ResolvedBrowser(url: managedChromeForTestingAppURL) {
+            return existing
+        }
+
+        try fileManager.createDirectory(at: managedChromeForTestingRootURL, withIntermediateDirectories: true)
+        let temporaryRoot = fileManager.temporaryDirectory
+            .appendingPathComponent("MacosWidgetsStatsChromeForTesting-")
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: temporaryRoot) }
+
+        let downloadURL = try chromeForTestingDownloadURL()
+        let archiveURL = temporaryRoot.appendingPathComponent("chrome-for-testing.zip", isDirectory: false)
+        try downloadFile(from: downloadURL, to: archiveURL)
+
+        let extractURL = temporaryRoot.appendingPathComponent("extract", isDirectory: true)
+        try fileManager.createDirectory(at: extractURL, withIntermediateDirectories: true)
+        try extractZip(at: archiveURL, to: extractURL)
+
+        guard let extractedAppURL = findExtractedChromeForTestingApp(in: extractURL) else {
+            throw ChromeBrowserProfileError.downloadFailed("Chrome for Testing archive did not contain Google Chrome for Testing.app.")
+        }
+
+        let stagingURL = managedChromeForTestingRootURL
+            .appendingPathComponent("Google Chrome for Testing.app.staging-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.copyItem(at: extractedAppURL, to: stagingURL)
+
+        if fileManager.fileExists(atPath: managedChromeForTestingAppURL.path) {
+            try fileManager.removeItem(at: managedChromeForTestingAppURL)
+        }
+        try fileManager.moveItem(at: stagingURL, to: managedChromeForTestingAppURL)
+
+        guard let browser = ResolvedBrowser(url: managedChromeForTestingAppURL) else {
+            throw ChromeBrowserProfileError.downloadFailed("Downloaded Chrome for Testing is not launchable.")
+        }
+        return browser
+    }
+
+    private func chromeForTestingDownloadURL() throws -> URL {
+        let data = try downloadData(from: chromeForTestingManifestURL, timeout: 60)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let channels = json["channels"] as? [String: Any],
+              let stable = channels["Stable"] as? [String: Any],
+              let downloads = stable["downloads"] as? [String: Any],
+              let chromeDownloads = downloads["chrome"] as? [[String: Any]] else {
+            throw ChromeBrowserProfileError.downloadFailed("Chrome for Testing manifest was unreadable.")
+        }
+
+        guard let match = chromeDownloads.first(where: { $0["platform"] as? String == chromeForTestingPlatform }),
+              let urlString = match["url"] as? String,
+              let url = URL(string: urlString) else {
+            throw ChromeBrowserProfileError.downloadFailed("Chrome for Testing manifest has no \(chromeForTestingPlatform) build.")
+        }
+        return url
+    }
+
+    private func downloadData(from url: URL, timeout: TimeInterval) throws -> Data {
+        let session = URLSession(configuration: chromeDownloadSessionConfiguration(timeout: timeout))
+        defer { session.invalidateAndCancel() }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Result<Data, Error>?
+        session.dataTask(with: url) { data, response, error in
+            if let error {
+                result = .failure(error)
+            } else if let httpResponse = response as? HTTPURLResponse,
+                      !(200..<300).contains(httpResponse.statusCode) {
+                result = .failure(ChromeBrowserProfileError.downloadFailed("HTTP \(httpResponse.statusCode) from \(url.host ?? url.absoluteString)."))
+            } else if let data {
+                result = .success(data)
+            } else {
+                result = .failure(ChromeBrowserProfileError.downloadFailed("No data returned from \(url.absoluteString)."))
+            }
+            semaphore.signal()
+        }.resume()
+
+        guard semaphore.wait(timeout: .now() + timeout) == .success, let result else {
+            throw ChromeBrowserProfileError.downloadFailed("Timed out downloading \(url.absoluteString).")
+        }
+        return try result.get()
+    }
+
+    private func downloadFile(from url: URL, to destinationURL: URL) throws {
+        let timeout: TimeInterval = 1_800
+        let session = URLSession(configuration: chromeDownloadSessionConfiguration(timeout: timeout))
+        defer { session.invalidateAndCancel() }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Result<URL, Error>?
+        session.downloadTask(with: url) { temporaryURL, response, error in
+            if let error {
+                result = .failure(error)
+            } else if let httpResponse = response as? HTTPURLResponse,
+                      !(200..<300).contains(httpResponse.statusCode) {
+                result = .failure(ChromeBrowserProfileError.downloadFailed("HTTP \(httpResponse.statusCode) from \(url.host ?? url.absoluteString)."))
+            } else if let temporaryURL {
+                result = .success(temporaryURL)
+            } else {
+                result = .failure(ChromeBrowserProfileError.downloadFailed("No file returned from \(url.absoluteString)."))
+            }
+            semaphore.signal()
+        }.resume()
+
+        guard semaphore.wait(timeout: .now() + timeout) == .success, let result else {
+            throw ChromeBrowserProfileError.downloadFailed("Timed out downloading \(url.absoluteString).")
+        }
+
+        let temporaryURL = try result.get()
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.moveItem(at: temporaryURL, to: destinationURL)
+    }
+
+    private func chromeDownloadSessionConfiguration(timeout: TimeInterval) -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
+        return configuration
+    }
+
+    private func extractZip(at archiveURL: URL, to destinationURL: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto", isDirectory: false)
+        process.arguments = ["-x", "-k", archiveURL.path, destinationURL.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw ChromeBrowserProfileError.downloadFailed("Failed to extract Chrome for Testing archive.")
+        }
+    }
+
+    private func findExtractedChromeForTestingApp(in rootURL: URL) -> URL? {
+        guard let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        for case let url as URL in enumerator {
+            if url.lastPathComponent == "Google Chrome for Testing.app",
+               let browser = ResolvedBrowser(url: url),
+               case .appBundle = browser.kind {
+                return url
+            }
+        }
+        return nil
     }
 
     private func activateBrowserIfPossible() {
@@ -336,6 +669,12 @@ final class ChromeBrowserProfile {
         allowed.remove(charactersIn: "&+=?#")
         return allowed
     }()
+}
+
+private extension ChromeBrowserPageTarget {
+    var asTarget: ChromeBrowserTarget {
+        ChromeBrowserTarget(id: id, webSocketDebuggerURL: webSocketDebuggerURL)
+    }
 }
 
 private struct ResolvedBrowser {
