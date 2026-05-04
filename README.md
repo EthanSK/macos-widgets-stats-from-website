@@ -143,10 +143,15 @@ Useful setup flow for an assistant:
 
 ## Caveats
 
-- **Scrapes via in-app browser.** The app signs in *as you* via a sandboxed
-  WKWebView profile. Cookies stay on your machine. No third-party server is
-  involved. If a site changes its layout the app marks the tracker stale or
-  broken after repeated failures and prompts you to re-identify the element.
+- **Browser profile reality.** Google-authenticated pages should use the
+  app's persistent Chrome/Chromium CDP profile; embedded `WKWebView` Google
+  OAuth is intentionally blocked/brittle. WKWebView remains useful for
+  non-Google/local pages, while CDP is the safer primary path for signed-in
+  Google dashboards. See [docs/google-auth-cdp-path.md](docs/google-auth-cdp-path.md).
+- **Local-only scraping.** The app signs in *as you* on this Mac. Cookies stay
+  on your machine. No third-party server is involved. If a site changes its
+  layout the app marks the tracker stale or broken after repeated failures and
+  prompts you to re-identify the element.
 - **macOS has no widget reload budget.** Apple's per-instance ~40–72/day cap
   is iOS-only ([Apple forum 711091](https://developer.apple.com/forums/thread/711091)).
   On macOS the app refreshes the widget whenever a meaningful new reading

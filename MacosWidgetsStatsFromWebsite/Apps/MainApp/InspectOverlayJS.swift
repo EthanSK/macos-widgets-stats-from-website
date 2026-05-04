@@ -31,6 +31,7 @@ enum InspectOverlayJS {
       if (window.webkit && webkit.messageHandlers && webkit.messageHandlers.inspectError) {
         webkit.messageHandlers.inspectError.postMessage({ message });
       } else {
+        window.__statsWidgetInspectError = { message };
         console.error(message);
       }
     }
@@ -187,7 +188,11 @@ enum InspectOverlayJS {
           }
         };
 
-        webkit.messageHandlers.elementPicked.postMessage(payload);
+        if (window.webkit && webkit.messageHandlers && webkit.messageHandlers.elementPicked) {
+          webkit.messageHandlers.elementPicked.postMessage(payload);
+        } else {
+          window.__statsWidgetPicked = payload;
+        }
         cleanup();
       } catch (error) {
         postError(error);
@@ -212,6 +217,7 @@ enum InspectOverlayJS {
     if (window.webkit && webkit.messageHandlers && webkit.messageHandlers.inspectError) {
       webkit.messageHandlers.inspectError.postMessage({ message });
     } else {
+      window.__statsWidgetInspectError = { message };
       console.error(message);
     }
   }
