@@ -47,7 +47,7 @@ final class ChromeBrowserProfile {
     static let shared = ChromeBrowserProfile()
     static let defaultProfileName = Tracker.defaultBrowserProfile
 
-    private let defaultCDPPort = 18800
+    private let baseCDPPort = 18880
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(label: "ChromeBrowserProfile")
     private var launchedProcess: Process?
@@ -55,13 +55,15 @@ final class ChromeBrowserProfile {
     private init() {}
 
     func configuration(profileName: String = ChromeBrowserProfile.defaultProfileName) -> ChromeBrowserLaunchConfiguration {
+        let sanitizedProfileName = safeProfileName(profileName)
+        let cdpPort = cdpPort(for: sanitizedProfileName)
         let root = AppGroupPaths.canonicalApplicationSupportURL()
             .appendingPathComponent("Browser", isDirectory: true)
-            .appendingPathComponent(safeProfileName(profileName), isDirectory: true)
+            .appendingPathComponent(sanitizedProfileName, isDirectory: true)
         return ChromeBrowserLaunchConfiguration(
             profileName: profileName,
-            cdpPort: defaultCDPPort,
-            cdpURL: URL(string: "http://127.0.0.1:\(defaultCDPPort)")!,
+            cdpPort: cdpPort,
+            cdpURL: URL(string: "http://127.0.0.1:\(cdpPort)")!,
             userDataDirectory: root.appendingPathComponent("user-data", isDirectory: true)
         )
     }
@@ -95,6 +97,9 @@ final class ChromeBrowserProfile {
     ) {
         let configuration = configuration(profileName: profileName)
         if isCDPReachable(configuration: configuration) {
+            if foreground {
+                activateBrowserIfPossible()
+            }
             completion(.success(configuration))
             return
         }
@@ -140,6 +145,7 @@ final class ChromeBrowserProfile {
 
     private func buildChromeLaunchArguments(configuration: ChromeBrowserLaunchConfiguration) -> [String] {
         [
+            "--remote-debugging-address=127.0.0.1",
             "--remote-debugging-port=\(configuration.cdpPort)",
             "--user-data-dir=\(configuration.userDataDirectory.path)",
             "--no-first-run",
@@ -150,7 +156,6 @@ final class ChromeBrowserProfile {
             "--disable-features=Translate,MediaRouter",
             "--disable-session-crashed-bubble",
             "--hide-crash-restore-bubble",
-            "--password-store=basic",
             "--no-proxy-server"
         ]
     }
@@ -287,6 +292,36 @@ final class ChromeBrowserProfile {
             URL(fileURLWithPath: "/usr/bin/chromium", isDirectory: false),
             URL(fileURLWithPath: "/usr/bin/google-chrome", isDirectory: false)
         ]
+    }
+
+    private func activateBrowserIfPossible() {
+        guard let browser = try? resolveBrowser(),
+              case .appBundle(let appURL) = browser.kind,
+              let bundleIdentifier = Bundle(url: appURL)?.bundleIdentifier else {
+            return
+        }
+
+        DispatchQueue.main.async {
+            for application in NSWorkspace.shared.runningApplications where application.bundleIdentifier == bundleIdentifier {
+                application.activate(options: [.activateIgnoringOtherApps])
+            }
+        }
+    }
+
+    private func cdpPort(for safeProfileName: String) -> Int {
+        if let override = ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_CDP_PORT"]?.nilIfEmpty,
+           let port = Int(override),
+           (1...65535).contains(port) {
+            return port
+        }
+
+        var hash: UInt32 = 2_166_136_261
+        for scalar in safeProfileName.unicodeScalars {
+            hash ^= UInt32(scalar.value)
+            hash = hash &* 16_777_619
+        }
+
+        return baseCDPPort + Int(hash % 1_000)
     }
 
     private func safeProfileName(_ raw: String) -> String {
