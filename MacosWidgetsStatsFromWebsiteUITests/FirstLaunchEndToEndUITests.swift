@@ -77,7 +77,7 @@ final class FirstLaunchEndToEndUITests: XCTestCase {
         XCTAssertEqual(widgets.count, 1)
         XCTAssertEqual(trackers.first?["url"] as? String, webURL)
         let selector = trackers.first?["selector"] as? String ?? ""
-        XCTAssertTrue(selector.contains("value"), "captured selector should point at the fixture value element, got \\(selector)")
+        XCTAssertTrue(selector.contains("value"), "captured selector should point at the fixture value element, got \(selector)")
     }
 
     func testGoogleSignInFallbackDoesNotStayInEmbeddedBrowser() throws {
@@ -90,10 +90,15 @@ final class FirstLaunchEndToEndUITests: XCTestCase {
 
         let webView = app.webViews.firstMatch
         XCTAssertTrue(webView.waitForExistence(timeout: 15), "WKWebView did not appear")
-        Thread.sleep(forTimeInterval: 1.0)
-        webView.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.24)).click()
 
-        let fallbackPredicate = NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "Google sign-in was opened in your default browser", "Google sign-in was opened in your default browser")
+        let googleLink = app.links["Continue with Google"]
+        if googleLink.waitForExistence(timeout: 5) {
+            googleLink.click()
+        } else {
+            webView.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.24)).click()
+        }
+
+        let fallbackPredicate = NSPredicate(format: "label CONTAINS[c] %@", "persistent CDP browser")
         let fallbackMessage = app.staticTexts.matching(fallbackPredicate).firstMatch
         XCTAssertTrue(fallbackMessage.waitForExistence(timeout: 5), "Google sign-in fallback message did not appear")
 
@@ -118,9 +123,15 @@ final class FirstLaunchEndToEndUITests: XCTestCase {
     private func enterURLAndContinue(_ url: String, in app: XCUIApplication) {
         let urlField = app.textFields.firstMatch
         XCTAssertTrue(urlField.waitForExistence(timeout: 5), "URL field missing")
-        urlField.click()
-        urlField.typeText(url)
+        app.activate()
+        replaceText(in: urlField, with: url)
         app.buttons["Continue"].click()
+    }
+
+    private func replaceText(in field: XCUIElement, with text: String) {
+        field.click()
+        field.typeKey("a", modifierFlags: .command)
+        field.typeText(text)
     }
 
     private func googleSignInFixtureURL() throws -> URL {
@@ -140,8 +151,15 @@ final class FirstLaunchEndToEndUITests: XCTestCase {
         let webView = app.webViews.firstMatch
         XCTAssertTrue(webView.waitForExistence(timeout: 15), "WKWebView did not appear")
         Thread.sleep(forTimeInterval: 1.0)
-        // The fixture places the value near the upper-left of the page, below the toolbar.
-        webView.coordinate(withNormalizedOffset: CGVector(dx: 0.16, dy: 0.18)).click()
+
+        let fixtureValue = app.staticTexts["987.65"]
+        if fixtureValue.waitForExistence(timeout: 5) {
+            fixtureValue.click()
+        } else {
+            // Fallback for WebKit accessibility delays: the fixture places the
+            // value near the upper-left of the page, below the toolbar.
+            webView.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.04)).click()
+        }
     }
 
     private static func defaultSandboxWritableRoot() -> URL {

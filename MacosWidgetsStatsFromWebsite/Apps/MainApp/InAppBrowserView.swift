@@ -105,12 +105,12 @@ struct InAppBrowserView: View {
             .help("Go")
 
             Button {
-                controller.openCurrentURLInDefaultBrowser()
+                controller.openCurrentURLInProfileBrowser()
             } label: {
-                Label("Open in Browser", systemImage: "safari")
+                Label("Open CDP Browser", systemImage: "globe")
             }
             .disabled(controller.currentURLForExternalOpen == nil)
-            .help("Open the current page in your default browser")
+            .help("Open the current page in the app's persistent Chrome/Chromium CDP profile")
 
             if allowsElementIdentification {
                 Button {
@@ -239,13 +239,13 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         webView.load(URLRequest(url: url))
     }
 
-    func openCurrentURLInDefaultBrowser() {
+    func openCurrentURLInProfileBrowser() {
         guard let url = currentURLForExternalOpen else {
-            inlineError = "Load a page before opening it in your browser."
+            inlineError = "Load a page before opening it in the CDP browser."
             return
         }
 
-        openExternalURL(url)
+        openProfileBrowser(url)
     }
 
     func startIdentifying() {
@@ -338,8 +338,8 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     }
 
     // Google's OAuth consent step can stall indefinitely in WKWebView after
-    // email/password/2FA succeeds. Keep the rest of Google sign-in in-app, but
-    // punt this one known-broken consent/picker route to the user's browser.
+    // email/password/2FA succeeds. Punt that known-broken consent/picker route
+    // to the same persistent Chrome/Chromium CDP profile used by scrapes.
     private static func shouldDeflectGoogleOAuthConsent(navigationAction: WKNavigationAction, url: URL) -> Bool {
         guard isGoogleOAuthConsentURL(url) else { return false }
         guard let targetFrame = navigationAction.targetFrame else { return true }
@@ -358,8 +358,8 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     }
 
     private func deflectGoogleOAuthConsent(_ url: URL) {
-        inlineNotice = "Opened Google's OAuth consent step in your default browser because it currently stalls in the embedded browser. Finish the sign-in there, then return here."
-        openExternalURL(url)
+        inlineNotice = "Google sign-in was opened in the app's persistent CDP browser because the embedded WebKit browser can stall on Google's OAuth consent step. Finish the sign-in there, then return here."
+        openProfileBrowser(url)
     }
 
     func webView(
@@ -431,6 +431,24 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         }
 
         NSWorkspace.shared.open(url)
+    }
+
+    private func openProfileBrowser(_ url: URL) {
+        guard ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_SUPPRESS_EXTERNAL_BROWSER_OPEN"] != "1" else {
+            return
+        }
+
+        ChromeBrowserProfile.shared.openVisibleBrowser(url: url) { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    self?.inlineError = nil
+                    self?.inlineNotice = "Opened in the app's persistent Chrome/Chromium CDP browser profile."
+                case .failure(let error):
+                    self?.inlineError = error.localizedDescription
+                }
+            }
+        }
     }
 
     private func browserErrorMessage(_ error: Error) -> String {

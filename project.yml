@@ -47,6 +47,11 @@ targets:
         # release sandbox is unchanged.
         Debug:
           CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/MainApp/MacosWidgetsStatsFromWebsite.Debug.entitlements
+          # Xcode's Debug Dylib launcher can start this SwiftUI macOS app
+          # windowless under UI automation / manual smoke runs. Keep Debug as a
+          # normal app binary so first-launch and browser-flow tests exercise the
+          # real window lifecycle.
+          ENABLE_DEBUG_DYLIB: NO
         Release:
           CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/MainApp/MacosWidgetsStatsFromWebsite.entitlements
     info:
@@ -103,12 +108,17 @@ targets:
     sources:
       - path: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension
       - path: MacosWidgetsStatsFromWebsite/Shared
+        excludes:
+          - Scraping/ChromeBrowserProfile.swift
+          - Scraping/ChromeCDPClient.swift
+          - Scraping/ChromeCDPScraper.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-widgets-stats-from-website.widget
         INFOPLIST_FILE: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension/MacosWidgetsStatsFromWebsiteWidget.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) WIDGET_EXTENSION"
         SKIP_INSTALL: YES
     info:
       path: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension/Info.plist

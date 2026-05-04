@@ -48,11 +48,7 @@ final class MCPServer {
 
     func stopSocketServer() {
         socketRunning = false
-        if socketFD >= 0 {
-            close(socketFD)
-            socketFD = -1
-        }
-        try? FileManager.default.removeItem(at: AppGroupPaths.mcpSocketURL())
+        wakeSocketServerIfNeeded()
     }
 
     func runStdioServer() {
@@ -86,6 +82,13 @@ final class MCPServer {
         }
 
         socketFD = fd
+        defer {
+            if socketFD == fd {
+                socketFD = -1
+            }
+            close(fd)
+            try? FileManager.default.removeItem(at: socketURL)
+        }
 
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
@@ -95,7 +98,6 @@ final class MCPServer {
         let maxPathLength = MemoryLayout.size(ofValue: address.sun_path)
         guard path.utf8.count < maxPathLength else {
             MCPInvocationLogger.logSystem("socket_path_too_long", detail: path)
-            close(fd)
             return
         }
 
@@ -115,7 +117,6 @@ final class MCPServer {
 
         guard bindResult == 0 else {
             MCPInvocationLogger.logSystem("socket_bind_failed", detail: String(errno))
-            close(fd)
             return
         }
 
@@ -123,7 +124,6 @@ final class MCPServer {
 
         guard listen(fd, 8) == 0 else {
             MCPInvocationLogger.logSystem("socket_listen_failed", detail: String(errno))
-            close(fd)
             return
         }
 
@@ -136,6 +136,11 @@ final class MCPServer {
                 continue
             }
 
+            guard socketRunning else {
+                close(clientFD)
+                break
+            }
+
             sessionQueue.async {
                 let handle = FileHandle(fileDescriptor: clientFD, closeOnDealloc: true)
                 let session = MCPConnectionSession(
@@ -145,6 +150,40 @@ final class MCPServer {
                     expectedTokenProvider: { MCPServer.shared.currentToken() }
                 )
                 session.run()
+            }
+        }
+    }
+
+    private func wakeSocketServerIfNeeded() {
+        guard socketFD >= 0 else {
+            try? FileManager.default.removeItem(at: AppGroupPaths.mcpSocketURL())
+            return
+        }
+
+        let socketURL = AppGroupPaths.mcpSocketURL()
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return }
+        defer { close(fd) }
+
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+
+        let path = socketURL.path
+        let maxPathLength = MemoryLayout.size(ofValue: address.sun_path)
+        guard path.utf8.count < maxPathLength else { return }
+
+        _ = path.withCString { pointer in
+            withUnsafeMutablePointer(to: &address.sun_path) { tuplePointer in
+                tuplePointer.withMemoryRebound(to: CChar.self, capacity: maxPathLength) { destination in
+                    strncpy(destination, pointer, maxPathLength - 1)
+                }
+            }
+        }
+
+        _ = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                connect(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
     }
@@ -1089,9 +1128,15 @@ private enum MCPToolDispatcher {
 
     private static func blockingScrape(_ tracker: Tracker) -> Result<TrackerReading, Error> {
         var result: Result<TrackerReading, Error>?
+        #if WIDGET_EXTENSION
         WKWebViewScraper.scrape(tracker: tracker) { scrapeResult in
             result = scrapeResult
         }
+        #else
+        ChromeCDPScraper.scrape(tracker: tracker) { scrapeResult in
+            result = scrapeResult
+        }
+        #endif
 
         if Thread.isMainThread {
             while result == nil {

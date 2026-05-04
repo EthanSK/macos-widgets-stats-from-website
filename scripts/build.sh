@@ -21,6 +21,7 @@ xcodebuild \
   -scheme MacosWidgetsStatsFromWebsite \
   -configuration Debug \
   -derivedDataPath "$DERIVED_DATA_PATH" \
+  ENABLE_DEBUG_DYLIB=NO \
   build
 
 APP_PATH="$DERIVED_DATA_PATH/Build/Products/Debug/MacosWidgetsStatsFromWebsite.app"
