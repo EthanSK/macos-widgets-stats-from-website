@@ -163,6 +163,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
 
         userContentController.add(identifyCoordinator, name: "elementPicked")
         userContentController.add(identifyCoordinator, name: "inspectError")
+        userContentController.add(identifyCoordinator, name: "inspectCanceled")
         webView = WebViewProfile.shared.makeWebView(frame: .zero, userContentController: userContentController)
 
         super.init()
@@ -173,11 +174,17 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
             onPreviewReady: { [weak self] preview in
                 self?.isIdentifying = false
                 self?.inlineError = nil
+                self?.inlineNotice = nil
                 self?.preview = preview
             },
             onError: { [weak self] message in
                 self?.inlineError = message
                 self?.isIdentifying = true
+            },
+            onCancelled: { [weak self] in
+                self?.isIdentifying = false
+                self?.inlineError = nil
+                self?.inlineNotice = "Identify Element canceled."
             }
         )
 
@@ -195,6 +202,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         webView.uiDelegate = nil
         userContentController.removeScriptMessageHandler(forName: "elementPicked")
         userContentController.removeScriptMessageHandler(forName: "inspectError")
+        userContentController.removeScriptMessageHandler(forName: "inspectCanceled")
     }
 
     func goBack() {
@@ -255,6 +263,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         }
 
         inlineError = nil
+        inlineNotice = "Hover an element, click to preview it, or press Esc to cancel."
         preview = nil
         isIdentifying = true
         webView.evaluateJavaScript(InspectOverlayJS.inspectOverlayJS) { [weak self] _, error in
@@ -270,12 +279,19 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
 
     func cancelIdentifying() {
         isIdentifying = false
+        inlineError = nil
+        inlineNotice = "Identify Element canceled."
         webView.evaluateJavaScript("window.__statsWidgetInspectCleanup && window.__statsWidgetInspectCleanup();", completionHandler: nil)
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        let wasIdentifying = isIdentifying
         isLoading = true
+        isIdentifying = false
         inlineError = nil
+        if wasIdentifying {
+            inlineNotice = nil
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -358,8 +374,13 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
     }
 
     private func deflectGoogleOAuthConsent(_ url: URL) {
-        inlineNotice = "Google sign-in was opened in the app's persistent CDP browser because the embedded WebKit browser can stall on Google's OAuth consent step. Finish the sign-in there, then return here."
-        openProfileBrowser(url)
+        let notice = "Google sign-in was opened in the app's persistent CDP browser because the embedded WebKit browser can stall on Google's OAuth consent step. Finish the sign-in there, then return here."
+        inlineNotice = notice
+        openProfileBrowser(
+            url,
+            successNotice: notice,
+            failurePrefix: "Google sign-in needs the CDP browser, but opening it failed"
+        )
     }
 
     func webView(
@@ -433,7 +454,7 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
         NSWorkspace.shared.open(url)
     }
 
-    private func openProfileBrowser(_ url: URL) {
+    private func openProfileBrowser(_ url: URL, successNotice: String? = nil, failurePrefix: String? = nil) {
         guard ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_SUPPRESS_EXTERNAL_BROWSER_OPEN"] != "1" else {
             return
         }
@@ -443,9 +464,13 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
                 switch result {
                 case .success:
                     self?.inlineError = nil
-                    self?.inlineNotice = "Opened in the app's persistent Chrome/Chromium CDP browser profile."
+                    self?.inlineNotice = successNotice ?? "Opened in the app's persistent Chrome/Chromium CDP browser profile."
                 case .failure(let error):
-                    self?.inlineError = error.localizedDescription
+                    if let failurePrefix {
+                        self?.inlineError = "\(failurePrefix): \(error.localizedDescription)"
+                    } else {
+                        self?.inlineError = error.localizedDescription
+                    }
                 }
             }
         }

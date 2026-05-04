@@ -36,6 +36,13 @@ enum InspectOverlayJS {
       }
     }
 
+    function postCanceled() {
+      if (window.webkit && webkit.messageHandlers && webkit.messageHandlers.inspectCanceled) {
+        webkit.messageHandlers.inspectCanceled.postMessage({});
+      }
+      window.__statsWidgetInspectCanceled = true;
+    }
+
     function isElement(value) {
       return value && value.nodeType === Node.ELEMENT_NODE;
     }
@@ -205,6 +212,7 @@ enum InspectOverlayJS {
         event.preventDefault();
         event.stopPropagation();
         cleanup();
+        postCanceled();
       }
     }
 

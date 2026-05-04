@@ -27,24 +27,29 @@ final class IdentifyElementCoordinator: NSObject, WKScriptMessageHandler {
 
     private var onPreviewReady: (ElementCapturePreview) -> Void
     private var onError: (String) -> Void
+    private var onCancelled: () -> Void
     private var isValidatingPick = false
 
     init(
         renderMode: RenderMode,
         onPreviewReady: @escaping (ElementCapturePreview) -> Void,
-        onError: @escaping (String) -> Void
+        onError: @escaping (String) -> Void,
+        onCancelled: @escaping () -> Void = {}
     ) {
         self.renderMode = renderMode
         self.onPreviewReady = onPreviewReady
         self.onError = onError
+        self.onCancelled = onCancelled
     }
 
     func setCallbacks(
         onPreviewReady: @escaping (ElementCapturePreview) -> Void,
-        onError: @escaping (String) -> Void
+        onError: @escaping (String) -> Void,
+        onCancelled: @escaping () -> Void
     ) {
         self.onPreviewReady = onPreviewReady
         self.onError = onError
+        self.onCancelled = onCancelled
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -70,6 +75,9 @@ final class IdentifyElementCoordinator: NSObject, WKScriptMessageHandler {
         case "inspectError":
             onError(errorMessage(from: message.body))
             rearmOverlay()
+        case "inspectCanceled":
+            isValidatingPick = false
+            onCancelled()
         default:
             break
         }
