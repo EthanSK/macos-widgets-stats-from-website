@@ -758,7 +758,10 @@ The widget extension now uses `StaticConfiguration` and reads the first saved
 `widgetConfigurations` row from the App Group store. macOS only needs to place
 the widget from Edit Widgets; the app remains the configuration UI. This avoids
 depending on a per-widget Edit sheet, which is not consistently exposed in the
-macOS desktop widget menu during development.
+macOS desktop widget menu during development. For the widget gallery itself,
+`getSnapshot(in:)` checks `context.isPreview` and returns fast sample data per
+widget family, matching Apple’s WidgetKit guidance that gallery previews should
+use sample data when live app data is not immediately available.
 
 This split — **rich configuration in the app, automatic rendering in the widget gallery/desktop widget** —
 mirrors simple stock/weather-style widgets: the widget is already set up when

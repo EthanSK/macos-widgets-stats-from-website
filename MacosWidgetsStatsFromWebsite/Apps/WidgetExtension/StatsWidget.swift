@@ -34,24 +34,44 @@ struct StatsWidgetEntry: TimelineEntry {
 }
 
 private enum StatsWidgetEntryFactory {
-    static func placeholder() -> StatsWidgetEntry {
-        StatsWidgetEntry(
+    static func placeholder(family: WidgetFamily = .systemSmall) -> StatsWidgetEntry {
+        galleryPreview(family: family)
+    }
+
+    static func galleryPreview(family: WidgetFamily) -> StatsWidgetEntry {
+        let trackers = previewTrackers
+        let templateID: WidgetTemplate
+        let trackerLimit: Int
+
+        switch family {
+        case .systemMedium:
+            templateID = .dashboard3Up
+            trackerLimit = 3
+        case .systemLarge:
+            templateID = .statsListWatchlist
+            trackerLimit = 4
+        case .systemExtraLarge:
+            templateID = .megaDashboardGrid
+            trackerLimit = 6
+        default:
+            templateID = .singleBigNumber
+            trackerLimit = 1
+        }
+
+        let selectedTrackers = Array(trackers.prefix(trackerLimit))
+        let configuration = WidgetConfiguration(
+            name: "AI Spend Dashboard",
+            templateID: templateID,
+            size: templateID.size,
+            layout: templateID.defaultLayout,
+            trackerIDs: selectedTrackers.map(\.id)
+        )
+
+        return StatsWidgetEntry(
             date: Date(),
-            configuration: WidgetConfiguration(
-                name: "Example Stat",
-                templateID: .singleBigNumber,
-                trackerIDs: []
-            ),
-            trackers: [
-                Tracker(
-                    name: "Example Stat",
-                    url: "https://example.com/dashboard",
-                    selector: "body",
-                    label: "Demo",
-                    accentColorHex: Tracker.defaultAccentColorHex
-                )
-            ],
-            readings: [:]
+            configuration: configuration,
+            trackers: selectedTrackers,
+            readings: previewReadings(for: selectedTrackers)
         )
     }
 
@@ -73,6 +93,39 @@ private enum StatsWidgetEntryFactory {
             trackers: trackers,
             readings: readings
         )
+    }
+
+    private static var previewTrackers: [Tracker] {
+        [
+            Tracker(name: "Codex spend", url: "https://example.com/codex", selector: "#spend", label: "Codex", accentColorHex: "#10a37f"),
+            Tracker(name: "OpenAI credits", url: "https://example.com/openai", selector: "#credits", label: "Credits", accentColorHex: "#0ea5e9"),
+            Tracker(name: "API usage", url: "https://example.com/api", selector: "#usage", label: "Usage", accentColorHex: "#f59e0b"),
+            Tracker(name: "Claude balance", url: "https://example.com/claude", selector: "#balance", label: "Claude", accentColorHex: "#8b5cf6"),
+            Tracker(name: "Runway minutes", url: "https://example.com/runway", selector: "#minutes", label: "Runway", accentColorHex: "#ef4444"),
+            Tracker(name: "Replicate", url: "https://example.com/replicate", selector: "#replicate", label: "Replicate", accentColorHex: "#22c55e")
+        ]
+    }
+
+    private static func previewReadings(for trackers: [Tracker]) -> [UUID: TrackerReading] {
+        let values: [(String, Double, [Double])] = [
+            ("$42.18", 42.18, [30, 33, 36, 38, 41, 42.18]),
+            ("$157", 157, [180, 172, 166, 163, 159, 157]),
+            ("18.4k", 18400, [11200, 12800, 14200, 15600, 17100, 18400]),
+            ("$23.70", 23.70, [16, 18, 19, 21, 22, 23.7]),
+            ("74 min", 74, [91, 86, 82, 79, 76, 74]),
+            ("$8.12", 8.12, [4, 5.2, 6.1, 6.8, 7.4, 8.12])
+        ]
+
+        return Dictionary(uniqueKeysWithValues: trackers.enumerated().map { index, tracker in
+            let value = values[index % values.count]
+            return (tracker.id, TrackerReading(
+                currentValue: value.0,
+                currentNumeric: value.1,
+                lastUpdatedAt: Date(),
+                status: .ok,
+                sparkline: value.2
+            ))
+        })
     }
 
     private static func selectConfiguration(from appConfiguration: AppConfiguration, configurationID: String?) -> WidgetConfiguration? {
@@ -102,11 +155,15 @@ private enum StatsWidgetEntryFactory {
 
 struct StatsWidgetProvider: TimelineProvider {
     func placeholder(in context: Context) -> StatsWidgetEntry {
-        StatsWidgetEntryFactory.placeholder()
+        StatsWidgetEntryFactory.placeholder(family: context.family)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (StatsWidgetEntry) -> Void) {
-        completion(StatsWidgetEntryFactory.makeEntry())
+        if context.isPreview {
+            completion(StatsWidgetEntryFactory.galleryPreview(family: context.family))
+        } else {
+            completion(StatsWidgetEntryFactory.makeEntry())
+        }
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<StatsWidgetEntry>) -> Void) {
