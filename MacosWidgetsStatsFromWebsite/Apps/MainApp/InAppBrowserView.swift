@@ -345,6 +345,9 @@ private final class InAppBrowserController: NSObject, ObservableObject, WKNaviga
             onNotice: { [weak self] message in
                 self?.inlineNotice = message
             },
+            onTargetSelected: { [weak self] targetID in
+                self?.lastProfileBrowserTargetID = targetID
+            },
             onCancelled: { [weak self] in
                 self?.chromeIdentifyCoordinator = nil
                 self?.activeIdentifyMode = nil
@@ -707,6 +710,7 @@ private final class ChromeIdentifyElementCoordinator {
     private let onPreviewReady: (ElementCapturePreview) -> Void
     private let onError: (String, Bool) -> Void
     private let onNotice: (String) -> Void
+    private let onTargetSelected: (String) -> Void
     private let onCancelled: () -> Void
 
     private var client: ChromeCDPClient?
@@ -720,12 +724,14 @@ private final class ChromeIdentifyElementCoordinator {
         onPreviewReady: @escaping (ElementCapturePreview) -> Void,
         onError: @escaping (String, Bool) -> Void,
         onNotice: @escaping (String) -> Void,
+        onTargetSelected: @escaping (String) -> Void,
         onCancelled: @escaping () -> Void
     ) {
         self.renderMode = renderMode
         self.onPreviewReady = onPreviewReady
         self.onError = onError
         self.onNotice = onNotice
+        self.onTargetSelected = onTargetSelected
         self.onCancelled = onCancelled
     }
 
@@ -798,6 +804,7 @@ private final class ChromeIdentifyElementCoordinator {
 
         switch result {
         case .success(let target):
+            onTargetSelected(target.id)
             let client = ChromeCDPClient(webSocketURL: target.webSocketDebuggerURL)
             self.client = client
             client.connect()

@@ -174,36 +174,31 @@ final class ChromeBrowserProfile {
             switch result {
             case .success(let targets):
                 if let preferredTargetID,
-                   let preferred = targets.first(where: { $0.id == preferredTargetID }) {
+                   let preferred = targets.first(where: { $0.id == preferredTargetID }),
+                   Self.reuseScore(for: preferred, requestedURL: url) != nil {
                     completion(.success(preferred.asTarget))
                     return
                 }
 
-                let requestedHost = url.host?.lowercased()
-                let safeHostMatches = targets.filter { target in
-                    guard let targetURL = target.url,
-                          targetURL.host?.lowercased() == requestedHost,
-                          !Self.isLikelyLogoutURL(targetURL) else {
-                        return false
+                let rankedTargets: [(score: Int, listIndex: Int, target: ChromeBrowserPageTarget)] = targets.enumerated().compactMap { index, target in
+                    guard let score = Self.reuseScore(for: target, requestedURL: url) else { return nil }
+                    return (score, index, target)
+                }.sorted { lhs, rhs in
+                    if lhs.score != rhs.score {
+                        return lhs.score > rhs.score
                     }
-                    return true
+                    // Preserve Chrome's /json/list ordering as the final tie-breaker.
+                    // In practice this keeps us on the already-visible/user-touched tab
+                    // instead of failing and creating a fresh logged-out tab.
+                    return lhs.listIndex < rhs.listIndex
                 }
 
-                if let match = safeHostMatches.first {
-                    completion(.success(match.asTarget))
+                if let bestTarget = rankedTargets.first?.target {
+                    completion(.success(bestTarget.asTarget))
                     return
                 }
 
-                let usableTargets = targets.filter { target in
-                    guard let targetURL = target.url else { return false }
-                    return Self.isUsableExistingPageURL(targetURL)
-                }
-                if usableTargets.count == 1, let onlyTarget = usableTargets.first {
-                    completion(.success(onlyTarget.asTarget))
-                    return
-                }
-
-                completion(.failure(ChromeBrowserProfileError.targetCreationFailed("No existing CDP browser tab matched the page to identify.")))
+                completion(.failure(ChromeBrowserProfileError.targetCreationFailed("No usable existing CDP browser tab was available to identify.")))
             case .failure(let error):
                 completion(.failure(error))
             }
@@ -398,6 +393,60 @@ final class ChromeBrowserProfile {
             return false
         }
         return !isLikelyLogoutURL(url)
+    }
+
+    private static func reuseScore(for target: ChromeBrowserPageTarget, requestedURL: URL) -> Int? {
+        guard let targetURL = target.url,
+              isUsableExistingPageURL(targetURL) else {
+            return nil
+        }
+
+        // Any usable existing CDP page is better than creating a new tab: it
+        // preserves the browser profile, Google login/cookies, and the page the
+        // user was actually working in. The rest of this score only chooses the
+        // most likely intended tab when several usable CDP pages exist.
+        var score = 10
+
+        if equivalentPageURL(targetURL, requestedURL) {
+            score += 1_000
+        }
+
+        if let requestedHost = requestedURL.host?.lowercased(),
+           targetURL.host?.lowercased() == requestedHost {
+            score += 500
+
+            let requestedPath = normalizedPath(requestedURL)
+            let targetPath = normalizedPath(targetURL)
+            if targetPath == requestedPath {
+                score += 100
+            } else if !requestedPath.isEmpty,
+                      (targetPath.hasPrefix(requestedPath) || requestedPath.hasPrefix(targetPath)) {
+                score += 25
+            }
+        }
+
+        if !target.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            score += 1
+        }
+
+        return score
+    }
+
+    private static func equivalentPageURL(_ lhs: URL, _ rhs: URL) -> Bool {
+        guard lhs.scheme?.lowercased() == rhs.scheme?.lowercased(),
+              lhs.host?.lowercased() == rhs.host?.lowercased(),
+              normalizedPath(lhs) == normalizedPath(rhs) else {
+            return false
+        }
+
+        let lhsQuery = lhs.query ?? ""
+        let rhsQuery = rhs.query ?? ""
+        return lhsQuery == rhsQuery
+    }
+
+    private static func normalizedPath(_ url: URL) -> String {
+        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return path.lowercased()
     }
 
     private func resolveBrowser() throws -> ResolvedBrowser {
