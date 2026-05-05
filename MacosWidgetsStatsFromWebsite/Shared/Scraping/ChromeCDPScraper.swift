@@ -17,6 +17,7 @@ final class ChromeCDPScraper {
     private let tracker: Tracker
     private let completion: Completion
     private var configuration: ChromeBrowserLaunchConfiguration?
+    private var backgroundUseConfiguration: ChromeBrowserLaunchConfiguration?
     private var target: ChromeBrowserTarget?
     private var client: ChromeCDPClient?
     private var timeout: DispatchWorkItem?
@@ -42,6 +43,11 @@ final class ChromeCDPScraper {
         }
 
         armTimeout()
+        backgroundUseConfiguration = ChromeBrowserProfile.shared.beginBackgroundUse(profileName: tracker.browserProfile)
+        ActivityLogger.log("scrape", "started scrape", metadata: [
+            "tracker": tracker.id.uuidString,
+            "profile": tracker.browserProfile
+        ])
         ChromeBrowserProfile.shared.ensureLaunched(profileName: tracker.browserProfile) { [weak self] result in
             DispatchQueue.main.async {
                 self?.handleBrowserLaunch(result)
@@ -53,6 +59,10 @@ final class ChromeCDPScraper {
         switch result {
         case .success(let configuration):
             self.configuration = configuration
+            ActivityLogger.log("scrape", "browser ready", metadata: [
+                "tracker": tracker.id.uuidString,
+                "port": "\(configuration.cdpPort)"
+            ])
             guard let url = validatedURL(from: tracker.url) else {
                 finish(.failure(ScraperError.invalidURL))
                 return
@@ -64,6 +74,10 @@ final class ChromeCDPScraper {
                 }
             }
         case .failure(let error):
+            ActivityLogger.log("scrape", "browser launch failed", metadata: [
+                "tracker": tracker.id.uuidString,
+                "error": error.localizedDescription
+            ])
             finish(.failure(error))
         }
     }
@@ -72,6 +86,10 @@ final class ChromeCDPScraper {
         switch result {
         case .success(let target):
             self.target = target
+            ActivityLogger.log("scrape", "opened CDP target", metadata: [
+                "tracker": tracker.id.uuidString,
+                "target": target.id
+            ])
             let client = ChromeCDPClient(webSocketURL: target.webSocketDebuggerURL)
             self.client = client
             client.connect()
@@ -81,6 +99,10 @@ final class ChromeCDPScraper {
                 }
             }
         case .failure(let error):
+            ActivityLogger.log("scrape", "target open failed", metadata: [
+                "tracker": tracker.id.uuidString,
+                "error": error.localizedDescription
+            ])
             finish(.failure(error))
         }
     }
@@ -313,8 +335,40 @@ final class ChromeCDPScraper {
         if let configuration, let target {
             ChromeBrowserProfile.shared.closeTarget(id: target.id, configuration: configuration)
         }
+        if let backgroundUseConfiguration {
+            ChromeBrowserProfile.shared.endBackgroundUse(configuration: backgroundUseConfiguration)
+        }
+        ActivityLogger.log("scrape", logMessage(for: result), metadata: logMetadata(for: result))
         completion(result)
         Self.activeScrapers[scrapeID] = nil
+    }
+
+    private func logMessage(for result: Result<TrackerReading, Error>) -> String {
+        switch result {
+        case .success:
+            return "finished scrape"
+        case .failure:
+            return "scrape failed"
+        }
+    }
+
+    private func logMetadata(for result: Result<TrackerReading, Error>) -> [String: String] {
+        var metadata: [String: String] = [
+            "tracker": tracker.id.uuidString,
+            "profile": tracker.browserProfile
+        ]
+
+        switch result {
+        case .success(let reading):
+            metadata["status"] = reading.status.rawValue
+            if let currentValue = reading.currentValue {
+                metadata["value"] = currentValue
+            }
+        case .failure(let error):
+            metadata["error"] = error.localizedDescription
+        }
+
+        return metadata
     }
 
     private func validatedURL(from string: String) -> URL? {

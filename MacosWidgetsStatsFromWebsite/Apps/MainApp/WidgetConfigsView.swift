@@ -55,12 +55,14 @@ struct WidgetConfigurationsView: View {
                 List(selection: $selectedConfigurationID) {
                     Section {
                         ForEach(store.widgetConfigurations) { configuration in
-                            WidgetConfigurationRow(configuration: configuration, trackers: store.trackers)
-                                .tag(configuration.id)
-                                .contentShape(Rectangle())
-                                .onTapGesture(count: 2) {
-                                    edit(configuration)
-                                }
+                            WidgetConfigurationRow(configuration: configuration, trackers: store.trackers) {
+                                edit(configuration)
+                            }
+                            .tag(configuration.id)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                edit(configuration)
+                            }
                                 .contextMenu {
                                     Button("Edit") {
                                         edit(configuration)
@@ -197,6 +199,7 @@ private struct WidgetSetupInstructionsFooter: View {
 private struct WidgetConfigurationRow: View {
     let configuration: WidgetConfiguration
     let trackers: [Tracker]
+    let onEdit: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -221,6 +224,16 @@ private struct WidgetConfigurationRow: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Capsule().fill(Color.secondary.opacity(0.12)))
+
+            Button(action: onEdit) {
+                Image(systemName: "pencil.circle.fill")
+                    .font(.title3)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .buttonStyle(.borderless)
+            .labelStyle(.iconOnly)
+            .help("Edit \(configuration.name.isEmpty ? "widget configuration" : configuration.name)")
+            .accessibilityLabel("Edit widget configuration")
         }
         .padding(.vertical, 5)
     }

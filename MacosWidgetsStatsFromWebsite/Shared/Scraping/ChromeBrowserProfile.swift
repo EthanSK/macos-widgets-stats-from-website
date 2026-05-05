@@ -61,7 +61,10 @@ final class ChromeBrowserProfile {
     private let chromeForTestingManifestURL = URL(string: "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json")!
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(label: "ChromeBrowserProfile")
-    private var launchedProcess: Process?
+    private var backgroundLaunchedApplications: [Int: NSRunningApplication] = [:]
+    private var backgroundLaunchedProcesses: [Int: Process] = [:]
+    private var backgroundUseCounts: [Int: Int] = [:]
+    private var userVisiblePorts: Set<Int> = []
 
     private init() {}
 
@@ -119,6 +122,7 @@ final class ChromeBrowserProfile {
         let configuration = configuration(profileName: profileName)
         if isCDPReachable(configuration: configuration) {
             if foreground {
+                markUserVisible(configuration: configuration)
                 activateBrowserIfPossible()
             }
             completion(.success(configuration))
@@ -136,6 +140,53 @@ final class ChromeBrowserProfile {
                 DispatchQueue.main.async {
                     completion(.failure(error))
                 }
+            }
+        }
+    }
+
+    @discardableResult
+    func beginBackgroundUse(profileName: String = ChromeBrowserProfile.defaultProfileName) -> ChromeBrowserLaunchConfiguration {
+        let configuration = configuration(profileName: profileName)
+        queue.sync {
+            backgroundUseCounts[configuration.cdpPort, default: 0] += 1
+        }
+        return configuration
+    }
+
+    func endBackgroundUse(configuration: ChromeBrowserLaunchConfiguration) {
+        queue.async { [weak self] in
+            guard let self else { return }
+
+            let port = configuration.cdpPort
+            let remaining = max(0, (self.backgroundUseCounts[port] ?? 1) - 1)
+            if remaining == 0 {
+                self.backgroundUseCounts[port] = nil
+            } else {
+                self.backgroundUseCounts[port] = remaining
+            }
+
+            guard remaining == 0, !self.userVisiblePorts.contains(port) else {
+                return
+            }
+
+            let application = self.backgroundLaunchedApplications.removeValue(forKey: port)
+            let process = self.backgroundLaunchedProcesses.removeValue(forKey: port)
+
+            if let process, process.isRunning {
+                process.terminate()
+            }
+
+            if let application, !application.isTerminated {
+                DispatchQueue.main.async {
+                    application.terminate()
+                }
+            }
+
+            if application != nil || process != nil {
+                ActivityLogger.log("browser", "closed app-owned background Chrome after scrape", metadata: [
+                    "profile": configuration.profileName,
+                    "port": "\(port)"
+                ])
             }
         }
     }
@@ -231,7 +282,38 @@ final class ChromeBrowserProfile {
             openConfiguration.arguments = arguments
             openConfiguration.activates = foreground
             openConfiguration.createsNewApplicationInstance = true
-            NSWorkspace.shared.openApplication(at: appURL, configuration: openConfiguration)
+            if foreground {
+                markUserVisible(configuration: configuration)
+            }
+
+            NSWorkspace.shared.openApplication(at: appURL, configuration: openConfiguration) { [weak self] application, error in
+                if let error {
+                    ActivityLogger.log("browser", "Chrome app launch callback reported failure", metadata: ["error": error.localizedDescription])
+                    return
+                }
+
+                guard !foreground, let application else {
+                    return
+                }
+
+                self?.queue.async { [weak self] in
+                    guard let self else { return }
+
+                    let port = configuration.cdpPort
+                    guard (self.backgroundUseCounts[port] ?? 0) > 0, !self.userVisiblePorts.contains(port) else {
+                        DispatchQueue.main.async {
+                            application.terminate()
+                        }
+                        ActivityLogger.log("browser", "closed late app-owned background Chrome after scrape", metadata: [
+                            "profile": configuration.profileName,
+                            "port": "\(port)"
+                        ])
+                        return
+                    }
+
+                    self.backgroundLaunchedApplications[port] = application
+                }
+            }
         case .executable(let executableURL):
             let process = Process()
             process.executableURL = executableURL
@@ -239,7 +321,22 @@ final class ChromeBrowserProfile {
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
             try process.run()
-            launchedProcess = process
+            if foreground {
+                markUserVisible(configuration: configuration)
+            } else {
+                backgroundLaunchedProcesses[configuration.cdpPort] = process
+            }
+        }
+
+        ActivityLogger.log("browser", foreground ? "opened visible Chrome profile" : "launched app-owned background Chrome", metadata: [
+            "profile": configuration.profileName,
+            "port": "\(configuration.cdpPort)"
+        ])
+    }
+
+    private func markUserVisible(configuration: ChromeBrowserLaunchConfiguration) {
+        queue.async { [weak self] in
+            self?.userVisiblePorts.insert(configuration.cdpPort)
         }
     }
 

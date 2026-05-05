@@ -23,6 +23,8 @@ struct MacosWidgetsStatsFromWebsiteApp: App {
             Darwin.exit(0)
         }
 
+        ActivityLogger.log("app", "launch")
+
         let store = AppGroupStore()
         _store = StateObject(wrappedValue: store)
         _backgroundScheduler = StateObject(wrappedValue: BackgroundScheduler(store: store))
@@ -35,6 +37,7 @@ struct MacosWidgetsStatsFromWebsiteApp: App {
                 .environmentObject(store)
                 .environmentObject(backgroundScheduler)
                 .onAppear {
+                    ActivityLogger.log("app", "main window appeared")
                     backgroundScheduler.sync()
                     DockBadgeUpdater.update()
                 }

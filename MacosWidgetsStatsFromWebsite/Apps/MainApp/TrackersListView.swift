@@ -42,12 +42,14 @@ struct TrackersListView: View {
             } else {
                 List(selection: $selectedTrackerID) {
                     ForEach(store.trackers) { tracker in
-                        TrackerRowView(tracker: tracker)
-                            .tag(tracker.id)
-                            .contentShape(Rectangle())
-                            .onTapGesture(count: 2) {
-                                edit(tracker)
-                            }
+                        TrackerRowView(tracker: tracker) {
+                            edit(tracker)
+                        }
+                        .tag(tracker.id)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            edit(tracker)
+                        }
                             .contextMenu {
                                 Button("Edit") {
                                     edit(tracker)
@@ -241,6 +243,7 @@ struct TrackersListView: View {
 
 private struct TrackerRowView: View {
     let tracker: Tracker
+    let onEdit: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -270,6 +273,16 @@ private struct TrackerRowView: View {
                         .fill(tracker.renderMode == .text ? Color.green.opacity(0.18) : Color.blue.opacity(0.16))
                 )
                 .foregroundStyle(tracker.renderMode == .text ? .green : .blue)
+
+            Button(action: onEdit) {
+                Image(systemName: "pencil.circle.fill")
+                    .font(.title3)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .buttonStyle(.borderless)
+            .labelStyle(.iconOnly)
+            .help("Edit \(tracker.name.isEmpty ? "tracker" : tracker.name)")
+            .accessibilityLabel("Edit tracker")
         }
         .padding(.vertical, 4)
     }

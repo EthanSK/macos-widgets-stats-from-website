@@ -34,6 +34,8 @@ struct PreferencesWindow: View {
                 SignInPrefsView()
             case .mcp:
                 MCPPrefsView()
+            case .logs:
+                ActivityLogPrefsView()
             case .about:
                 AboutPrefsView()
             }
@@ -209,6 +211,7 @@ private enum PreferencesSection: String, CaseIterable, Hashable, Identifiable {
     case widgets
     case browser
     case mcp
+    case logs
     case about
 
     var id: String {
@@ -225,6 +228,8 @@ private enum PreferencesSection: String, CaseIterable, Hashable, Identifiable {
             return "Chrome Profile"
         case .mcp:
             return "MCP"
+        case .logs:
+            return "Activity Log"
         case .about:
             return "About"
         }
@@ -240,9 +245,104 @@ private enum PreferencesSection: String, CaseIterable, Hashable, Identifiable {
             return "globe"
         case .mcp:
             return "point.3.connected.trianglepath.dotted"
+        case .logs:
+            return "doc.text.magnifyingglass"
         case .about:
             return "info.circle"
         }
+    }
+}
+
+private struct ActivityLogPrefsView: View {
+    @State private var logText = ""
+    @State private var statusMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Activity Log")
+                        .font(.title2.weight(.semibold))
+                    Text("App, scrape, browser, MCP, and widget activity is written here for debugging.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    refresh()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .help("Reload recent log entries")
+
+                Button {
+                    openLogFile()
+                } label: {
+                    Label("View Log", systemImage: "doc.text")
+                }
+                .help("Open activity.log")
+
+                Button {
+                    revealLogsFolder()
+                } label: {
+                    Label("Open Logs", systemImage: "folder")
+                }
+                .help("Reveal the logs folder in Finder")
+            }
+
+            Text(ActivityLogger.logFileURL().path)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView {
+                Text(logText.isEmpty ? "No activity has been logged yet." : logText)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(logText.isEmpty ? .secondary : .primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(12)
+            }
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.2))
+            )
+        }
+        .padding(24)
+        .navigationTitle("Activity Log")
+        .onAppear {
+            ActivityLogger.log("ui", "opened activity log preferences")
+            refresh()
+        }
+    }
+
+    private func refresh() {
+        ActivityLogger.ensureLogFileExists()
+        logText = ActivityLogger.recentLogText(lineLimit: 300)
+        statusMessage = "Showing the most recent log lines."
+    }
+
+    private func openLogFile() {
+        ActivityLogger.ensureLogFileExists()
+        NSWorkspace.shared.open(ActivityLogger.logFileURL())
+        statusMessage = "Opened activity.log."
+        ActivityLogger.log("ui", "opened activity log file")
+    }
+
+    private func revealLogsFolder() {
+        ActivityLogger.ensureLogFileExists()
+        NSWorkspace.shared.activateFileViewerSelecting([ActivityLogger.logFileURL()])
+        statusMessage = "Revealed the logs folder in Finder."
+        ActivityLogger.log("ui", "revealed logs folder")
     }
 }
 

@@ -129,8 +129,13 @@ final class AppGroupStore: ObservableObject {
 
             schemaVersion = currentSchemaVersion
             lastPersistenceError = nil
+            ActivityLogger.log("store", "saved configuration", metadata: [
+                "trackers": "\(trackers.count)",
+                "widgets": "\(widgetConfigurations.count)"
+            ])
         } catch {
             lastPersistenceError = error.localizedDescription
+            ActivityLogger.log("store", "configuration save failed", metadata: ["error": error.localizedDescription])
         }
     }
 
@@ -141,6 +146,10 @@ final class AppGroupStore: ObservableObject {
         widgetConfigurations = configuration.widgetConfigurations
         preferences = configuration.preferences
         lastPersistenceError = nil
+        ActivityLogger.log("store", "reloaded configuration", metadata: [
+            "trackers": "\(trackers.count)",
+            "widgets": "\(widgetConfigurations.count)"
+        ])
     }
 
     static func hasExistingConfigurationFile() -> Bool {
@@ -190,6 +199,10 @@ final class AppGroupStore: ObservableObject {
             file.schemaVersion = currentSchemaVersion
             file.readings[key] = reading
             try write(readingsFile: file)
+            ActivityLogger.log("store", "recorded reading", metadata: [
+                "tracker": tracker.id.uuidString,
+                "status": reading.status.rawValue
+            ])
         }
     }
 
@@ -216,6 +229,12 @@ final class AppGroupStore: ObservableObject {
             file.schemaVersion = currentSchemaVersion
             file.readings[tracker.id.uuidString] = reading
             try write(readingsFile: file)
+            ActivityLogger.log("store", "recorded scrape failure", metadata: [
+                "tracker": tracker.id.uuidString,
+                "failures": "\(failureCount)",
+                "status": status.rawValue,
+                "error": message
+            ])
             return reading
         }
     }
