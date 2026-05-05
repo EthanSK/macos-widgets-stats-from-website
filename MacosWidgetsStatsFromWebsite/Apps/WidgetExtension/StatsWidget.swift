@@ -5,15 +5,10 @@
 //  App Group backed WidgetKit renderer.
 //
 
+import AppIntents
 import AppKit
-import Intents
 import SwiftUI
 import WidgetKit
-
-@objc(StatsWidgetConfigurationIntent)
-final class StatsWidgetConfigurationIntent: INIntent {
-    @NSManaged var configurationID: String?
-}
 
 struct StatsWidgetEntry: TimelineEntry {
     let date: Date
@@ -39,10 +34,8 @@ struct StatsWidgetEntry: TimelineEntry {
     }
 }
 
-struct StatsWidgetProvider: IntentTimelineProvider {
-    typealias Intent = StatsWidgetConfigurationIntent
-
-    func placeholder(in context: Context) -> StatsWidgetEntry {
+private enum StatsWidgetEntryFactory {
+    static func placeholder() -> StatsWidgetEntry {
         StatsWidgetEntry(
             date: Date(),
             configuration: WidgetConfiguration(
@@ -63,28 +56,10 @@ struct StatsWidgetProvider: IntentTimelineProvider {
         )
     }
 
-    func getSnapshot(
-        for configuration: StatsWidgetConfigurationIntent,
-        in context: Context,
-        completion: @escaping (StatsWidgetEntry) -> Void
-    ) {
-        completion(makeEntry(for: configuration))
-    }
-
-    func getTimeline(
-        for configuration: StatsWidgetConfigurationIntent,
-        in context: Context,
-        completion: @escaping (Timeline<StatsWidgetEntry>) -> Void
-    ) {
-        let entry = makeEntry(for: configuration)
-        let nextDate = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
-        completion(Timeline(entries: [entry], policy: .after(nextDate)))
-    }
-
-    private func makeEntry(for intent: StatsWidgetConfigurationIntent) -> StatsWidgetEntry {
+    static func makeEntry(configurationID: String? = nil) -> StatsWidgetEntry {
         let appConfiguration = AppGroupStore.loadAppGroupConfiguration()
         let readingsFile = AppGroupStore.loadReadings()
-        let selectedConfiguration = selectConfiguration(from: appConfiguration, intent: intent)
+        let selectedConfiguration = selectConfiguration(from: appConfiguration, configurationID: configurationID)
         let trackerIDs = selectedConfiguration?.trackerIDs ?? appConfiguration.trackers.prefix(1).map(\.id)
         let trackers = trackerIDs.compactMap { id in
             appConfiguration.trackers.first { $0.id == id }
@@ -101,8 +76,8 @@ struct StatsWidgetProvider: IntentTimelineProvider {
         )
     }
 
-    private func selectConfiguration(from appConfiguration: AppConfiguration, intent: StatsWidgetConfigurationIntent) -> WidgetConfiguration? {
-        if let configurationID = intent.configurationID,
+    private static func selectConfiguration(from appConfiguration: AppConfiguration, configurationID: String?) -> WidgetConfiguration? {
+        if let configurationID,
            let id = UUID(uuidString: configurationID.trimmingCharacters(in: .whitespacesAndNewlines)),
            let match = appConfiguration.widgetConfigurations.first(where: { $0.id == id }) {
             return match
@@ -123,6 +98,122 @@ struct StatsWidgetProvider: IntentTimelineProvider {
             layout: .single,
             trackerIDs: [tracker.id]
         )
+    }
+}
+
+struct StatsWidgetProvider: TimelineProvider {
+    func placeholder(in context: Context) -> StatsWidgetEntry {
+        StatsWidgetEntryFactory.placeholder()
+    }
+
+    func getSnapshot(in context: Context, completion: @escaping (StatsWidgetEntry) -> Void) {
+        completion(StatsWidgetEntryFactory.makeEntry())
+    }
+
+    func getTimeline(in context: Context, completion: @escaping (Timeline<StatsWidgetEntry>) -> Void) {
+        let entry = StatsWidgetEntryFactory.makeEntry()
+        let nextDate = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
+        completion(Timeline(entries: [entry], policy: .after(nextDate)))
+    }
+}
+
+struct StatsWidgetConfigurationSelection: AppEntity {
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Widget Configuration"
+    static var defaultQuery = StatsWidgetConfigurationSelectionQuery()
+
+    let id: String
+    let name: String
+    let details: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(
+            title: LocalizedStringResource(stringLiteral: name),
+            subtitle: details.isEmpty ? nil : LocalizedStringResource(stringLiteral: details)
+        )
+    }
+
+    init(configuration: WidgetConfiguration, trackers: [Tracker]) {
+        let selectedTrackerCount = configuration.trackerIDs.filter { trackerID in
+            trackers.contains { $0.id == trackerID }
+        }.count
+        let trackerLabel = selectedTrackerCount == 1 ? "1 tracker" : "\(selectedTrackerCount) trackers"
+
+        id = configuration.id.uuidString
+        name = configuration.name.isEmpty ? "Untitled Widget" : configuration.name
+        details = "\(configuration.templateID.displayName) · \(configuration.size.displayName) · \(trackerLabel)"
+    }
+}
+
+@available(macOSApplicationExtension 14.0, *)
+struct StatsWidgetConfigurationSelectionQuery: EntityStringQuery {
+    init() {}
+
+    func entities(for identifiers: [StatsWidgetConfigurationSelection.ID]) async throws -> [StatsWidgetConfigurationSelection] {
+        let wanted = Set(identifiers.map { $0.uppercased() })
+        return Self.allSelections().filter { wanted.contains($0.id.uppercased()) }
+    }
+
+    func suggestedEntities() async throws -> [StatsWidgetConfigurationSelection] {
+        Self.allSelections()
+    }
+
+    func defaultResult() async -> StatsWidgetConfigurationSelection? {
+        Self.allSelections().first
+    }
+
+    func entities(matching string: String) async throws -> [StatsWidgetConfigurationSelection] {
+        let query = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else {
+            return Self.allSelections()
+        }
+
+        return Self.allSelections().filter { selection in
+            selection.name.lowercased().contains(query) || selection.details.lowercased().contains(query)
+        }
+    }
+
+    static func allSelections() -> [StatsWidgetConfigurationSelection] {
+        let appConfiguration = AppGroupStore.loadAppGroupConfiguration()
+        return appConfiguration.widgetConfigurations.map { configuration in
+            StatsWidgetConfigurationSelection(configuration: configuration, trackers: appConfiguration.trackers)
+        }
+    }
+}
+
+struct StatsWidgetConfigurationAppIntent: WidgetConfigurationIntent {
+    static var title: LocalizedStringResource = "Stats Widget"
+    static var description = IntentDescription("Choose which saved widget configuration this desktop widget should show.")
+
+    @Parameter(title: "Configuration")
+    var configuration: StatsWidgetConfigurationSelection?
+
+    init() {}
+
+    init(configuration: StatsWidgetConfigurationSelection?) {
+        self.configuration = configuration
+    }
+}
+
+struct AppIntentStatsWidgetProvider: AppIntentTimelineProvider {
+    func placeholder(in context: Context) -> StatsWidgetEntry {
+        StatsWidgetEntryFactory.placeholder()
+    }
+
+    func snapshot(for configuration: StatsWidgetConfigurationAppIntent, in context: Context) async -> StatsWidgetEntry {
+        StatsWidgetEntryFactory.makeEntry(configurationID: configuration.configuration?.id)
+    }
+
+    func timeline(for configuration: StatsWidgetConfigurationAppIntent, in context: Context) async -> Timeline<StatsWidgetEntry> {
+        let entry = StatsWidgetEntryFactory.makeEntry(configurationID: configuration.configuration?.id)
+        let nextDate = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
+        return Timeline(entries: [entry], policy: .after(nextDate))
+    }
+
+    func recommendations() -> [AppIntentRecommendation<StatsWidgetConfigurationAppIntent>] {
+        StatsWidgetConfigurationSelectionQuery.allSelections().map { selection in
+            let intent = StatsWidgetConfigurationAppIntent(configuration: selection)
+            return AppIntentRecommendation(intent: intent, description: selection.name)
+        }
     }
 }
 
@@ -260,7 +351,7 @@ struct StatsWidget: Widget {
     private let kind = "MacosWidgetsStatsFromWebsite"
 
     var body: some SwiftUI.WidgetConfiguration {
-        IntentConfiguration(kind: kind, intent: StatsWidgetConfigurationIntent.self, provider: StatsWidgetProvider()) { entry in
+        AppIntentConfiguration(kind: kind, intent: StatsWidgetConfigurationAppIntent.self, provider: AppIntentStatsWidgetProvider()) { entry in
             StatsWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("macOS Widgets Stats from Website")
@@ -269,11 +360,7 @@ struct StatsWidget: Widget {
     }
 
     private var supportedFamilies: [WidgetFamily] {
-        var families: [WidgetFamily] = [.systemSmall, .systemMedium, .systemLarge]
-        if #available(macOSApplicationExtension 14.0, *) {
-            families.append(.systemExtraLarge)
-        }
-        return families
+        [.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge]
     }
 }
 

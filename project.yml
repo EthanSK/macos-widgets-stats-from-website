@@ -103,7 +103,7 @@ targets:
   MacosWidgetsStatsFromWebsiteWidget:
     type: app-extension
     platform: macOS
-    deploymentTarget: "13.0"
+    deploymentTarget: "14.0"
     productName: MacosWidgetsStatsFromWebsiteWidget
     sources:
       - path: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension

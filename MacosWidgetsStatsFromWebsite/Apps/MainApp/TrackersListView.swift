@@ -42,17 +42,9 @@ struct TrackersListView: View {
             } else {
                 List(selection: $selectedTrackerID) {
                     ForEach(store.trackers) { tracker in
-                        TrackerRowView(
-                            tracker: tracker,
-                            onEdit: {
-                                edit(tracker)
-                            }
-                        )
+                        TrackerRowView(tracker: tracker)
                             .tag(tracker.id)
                             .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedTrackerID = tracker.id
-                            }
                             .onTapGesture(count: 2) {
                                 edit(tracker)
                             }
@@ -249,7 +241,6 @@ struct TrackersListView: View {
 
 private struct TrackerRowView: View {
     let tracker: Tracker
-    let onEdit: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -279,15 +270,6 @@ private struct TrackerRowView: View {
                         .fill(tracker.renderMode == .text ? Color.green.opacity(0.18) : Color.blue.opacity(0.16))
                 )
                 .foregroundStyle(tracker.renderMode == .text ? .green : .blue)
-
-            Button {
-                onEdit()
-            } label: {
-                Label("Edit", systemImage: "pencil")
-            }
-            .buttonStyle(.borderless)
-            .controlSize(.small)
-            .help("Edit \(tracker.name.isEmpty ? "tracker" : tracker.name)")
         }
         .padding(.vertical, 4)
     }

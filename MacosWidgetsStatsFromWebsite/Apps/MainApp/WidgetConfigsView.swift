@@ -38,7 +38,10 @@ struct WidgetConfigurationsView: View {
                         Label("Create Widget Configuration", systemImage: "plus")
                     }
                     .disabled(store.trackers.isEmpty)
-                    WidgetSetupInstructionsView(configurationName: nil)
+                    Text("After you create a configuration, add the desktop widget from macOS Edit Widgets. Right-click the placed widget, choose Edit Widget, and select the configuration. Widget configuration requires macOS 14 or later.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                         .frame(maxWidth: 520)
                     if store.trackers.isEmpty {
                         Text("Tip: the first-launch wizard creates one tracker and one widget configuration together.")
@@ -49,41 +52,30 @@ struct WidgetConfigurationsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
             } else {
-                VStack(spacing: 0) {
-                    WidgetSetupInstructionsView(configurationName: selectedConfiguration?.name ?? store.widgetConfigurations.first?.name)
-                        .padding([.horizontal, .top], 12)
-                        .padding(.bottom, 8)
-
-                    List(selection: $selectedConfigurationID) {
+                List(selection: $selectedConfigurationID) {
+                    Section {
                         ForEach(store.widgetConfigurations) { configuration in
-                            WidgetConfigurationRow(
-                                configuration: configuration,
-                                trackers: store.trackers,
-                                onEdit: {
-                                    edit(configuration)
-                                }
-                            )
+                            WidgetConfigurationRow(configuration: configuration, trackers: store.trackers)
                                 .tag(configuration.id)
                                 .contentShape(Rectangle())
-                                .onTapGesture {
-                                    selectedConfigurationID = configuration.id
-                                }
                                 .onTapGesture(count: 2) {
                                     edit(configuration)
                                 }
                                 .contextMenu {
-                                Button("Edit") {
-                                    edit(configuration)
+                                    Button("Edit") {
+                                        edit(configuration)
+                                    }
+                                    Button("Duplicate") {
+                                        duplicate(configuration)
+                                    }
+                                    Divider()
+                                    Button("Delete", role: .destructive) {
+                                        delete(configuration)
+                                    }
                                 }
-                                Button("Duplicate") {
-                                    duplicate(configuration)
-                                }
-                                Divider()
-                                Button("Delete", role: .destructive) {
-                                    delete(configuration)
-                                }
-                            }
                         }
+                    } footer: {
+                        WidgetSetupInstructionsFooter(configurationName: selectedConfiguration?.name ?? store.widgetConfigurations.first?.name)
                     }
                 }
             }
@@ -182,25 +174,15 @@ struct WidgetConfigurationsView: View {
     }
 }
 
-private struct WidgetSetupInstructionsView: View {
+private struct WidgetSetupInstructionsFooter: View {
     let configurationName: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Add the widget from macOS", systemImage: "rectangle.grid.2x2")
-                .font(.callout.weight(.semibold))
-
-            Text("Right-click the desktop or Notification Centre, choose Edit Widgets, search for macOS Widgets Stats from Website, drag a widget onto the desktop, then choose \(quotedConfigurationName) in the widget's configuration picker.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.secondary.opacity(0.08))
-        )
+        Text("Add the widget from macOS Edit Widgets. Right-click the placed widget, choose Edit Widget, and select \(quotedConfigurationName) from Configuration. Widget configuration requires macOS 14 or later.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 4)
     }
 
     private var quotedConfigurationName: String {
@@ -215,7 +197,6 @@ private struct WidgetSetupInstructionsView: View {
 private struct WidgetConfigurationRow: View {
     let configuration: WidgetConfiguration
     let trackers: [Tracker]
-    let onEdit: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -240,15 +221,6 @@ private struct WidgetConfigurationRow: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Capsule().fill(Color.secondary.opacity(0.12)))
-
-            Button {
-                onEdit()
-            } label: {
-                Label("Edit", systemImage: "pencil")
-            }
-            .buttonStyle(.borderless)
-            .controlSize(.small)
-            .help("Edit \(configuration.name.isEmpty ? "widget configuration" : configuration.name)")
         }
         .padding(.vertical, 5)
     }
