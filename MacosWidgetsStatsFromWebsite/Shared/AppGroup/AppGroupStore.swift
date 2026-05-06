@@ -286,15 +286,33 @@ final class AppGroupStore: ObservableObject {
         case (true, true):
             guard let appGroupURL,
                   modificationDate(for: appGroupURL) > modificationDate(for: canonicalURL) else {
+                mirrorToAppGroupIfAvailable(canonical, appGroupURL: appGroupURL)
                 return canonical
             }
             return appGroup
         case (true, false):
+            mirrorToAppGroupIfAvailable(canonical, appGroupURL: appGroupURL)
             return canonical
         case (false, true):
             return appGroup
         case (false, false):
             return canonical
+        }
+    }
+
+    private static func mirrorToAppGroupIfAvailable(_ configuration: AppConfiguration, appGroupURL: URL?) {
+        guard let appGroupURL else {
+            return
+        }
+
+        do {
+            try write(configuration: configuration, to: appGroupURL)
+            ActivityLogger.log("store", "mirrored canonical configuration to app group", metadata: [
+                "trackers": "\(configuration.trackers.count)",
+                "widgets": "\(configuration.widgetConfigurations.count)"
+            ])
+        } catch {
+            ActivityLogger.log("store", "app group mirror failed", metadata: ["error": error.localizedDescription])
         }
     }
 
