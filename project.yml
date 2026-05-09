@@ -69,7 +69,7 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
-        CFBundleShortVersionString: "0.12.7"
+        CFBundleShortVersionString: "0.12.9"
         CFBundleVersion: "1207"
         CFBundleDocumentTypes:
           - CFBundleTypeName: macOS Widgets Stats from Website Selector Pack
@@ -140,7 +140,7 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
-        CFBundleShortVersionString: "0.12.7"
+        CFBundleShortVersionString: "0.12.9"
         CFBundleVersion: "1207"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
@@ -178,7 +178,7 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
-        CFBundleShortVersionString: "0.12.7"
+        CFBundleShortVersionString: "0.12.9"
         CFBundleVersion: "1207"
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
     entitlements:
