@@ -164,6 +164,173 @@ final class AppGroupStore: ObservableObject {
         return candidateURLs.compactMap { $0 }.contains { fileManager.fileExists(atPath: $0.path) }
     }
 
+    // MARK: - Legacy App Group container migration
+
+    /// Names of files copied from the legacy unprefixed App Group container
+    /// (`group.com.ethansk.macos-widgets-stats-from-website`) into the
+    /// team-prefixed container adopted in 0.12.7.  Anything outside this list
+    /// (Logs/, Library/, .DS_Store, mcp.sock, lock files) is intentionally
+    /// left behind so the new container starts clean.
+    private static let legacyMigrationFileNames: [String] = [
+        AppGroupPaths.trackersFileName,
+        AppGroupPaths.readingsFileName
+    ]
+
+    private static let legacyMigrationCompletedDefaultsKey =
+        "AppGroupStore.legacyDataMigrationCompleted"
+
+    private static let legacyAppGroupIdentifier =
+        "group.com.ethansk.macos-widgets-stats-from-website"
+
+    /// One-time copy of user-data JSON from the legacy unprefixed App Group
+    /// container into the new team-prefixed container.  Idempotent: skips
+    /// files that already exist in the new container, persists a UserDefaults
+    /// flag so it never repeats, and never throws — failures are logged and
+    /// swallowed so the app keeps launching even on disk/permission errors.
+    ///
+    /// MUST be called before any code constructs `AppGroupStore` or calls
+    /// `loadSharedConfiguration()`, because those write into the new
+    /// container and would defeat the "new container is missing those files"
+    /// guard below.
+    static func migrateLegacyAppGroupContainerIfNeeded() {
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: legacyMigrationCompletedDefaultsKey) {
+            return
+        }
+
+        // Skip migration entirely under the test-container override —
+        // tests use a sandboxed temp dir and shouldn't touch ~/Library.
+        if ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_TEST_CONTAINER"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            defaults.set(true, forKey: legacyMigrationCompletedDefaultsKey)
+            return
+        }
+
+        let fileManager = FileManager.default
+
+        guard let newContainerURL = fileManager.containerURL(
+            forSecurityApplicationGroupIdentifier: AppGroupPaths.identifier
+        ) else {
+            // No new container yet (entitlements not active?). Leave the
+            // flag unset so we retry on next launch when the container
+            // exists.
+            ActivityLogger.log(
+                "store",
+                "legacy migration skipped: new container unavailable"
+            )
+            return
+        }
+
+        let legacyContainerURL = legacyContainerDirectoryURL()
+        var legacyExists: ObjCBool = false
+        guard fileManager.fileExists(atPath: legacyContainerURL.path, isDirectory: &legacyExists),
+              legacyExists.boolValue else {
+            // No legacy container at all — fresh install, nothing to copy.
+            // Mark complete so we don't keep checking on every launch.
+            defaults.set(true, forKey: legacyMigrationCompletedDefaultsKey)
+            ActivityLogger.log(
+                "store",
+                "legacy migration skipped: no legacy container",
+                metadata: ["legacy": legacyContainerURL.path]
+            )
+            return
+        }
+
+        do {
+            try fileManager.createDirectory(
+                at: newContainerURL,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            ActivityLogger.log(
+                "store",
+                "legacy migration: failed to ensure new container directory",
+                metadata: ["error": error.localizedDescription]
+            )
+            // Don't set the completed flag — try again next launch.
+            return
+        }
+
+        var copiedAny = false
+        var anyFailure = false
+
+        for fileName in legacyMigrationFileNames {
+            let sourceURL = legacyContainerURL.appendingPathComponent(fileName, isDirectory: false)
+            let destinationURL = newContainerURL.appendingPathComponent(fileName, isDirectory: false)
+
+            guard fileManager.fileExists(atPath: sourceURL.path) else {
+                ActivityLogger.log(
+                    "store",
+                    "legacy migration: source missing",
+                    metadata: ["file": fileName]
+                )
+                continue
+            }
+
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                ActivityLogger.log(
+                    "store",
+                    "legacy migration: destination already populated, skipping",
+                    metadata: ["file": fileName]
+                )
+                continue
+            }
+
+            do {
+                try fileManager.copyItem(at: sourceURL, to: destinationURL)
+                copiedAny = true
+                ActivityLogger.log(
+                    "store",
+                    "legacy migration: copied file",
+                    metadata: [
+                        "file": fileName,
+                        "from": sourceURL.path,
+                        "to": destinationURL.path
+                    ]
+                )
+            } catch {
+                anyFailure = true
+                ActivityLogger.log(
+                    "store",
+                    "legacy migration: copy failed",
+                    metadata: [
+                        "file": fileName,
+                        "error": error.localizedDescription
+                    ]
+                )
+            }
+        }
+
+        // Persist the flag so this never runs twice — even if a copy
+        // failed, retrying on every launch would fight the user (e.g. they
+        // intentionally deleted a file in the new container after launch).
+        // Onboarding still works as a manual fallback if everything failed.
+        defaults.set(true, forKey: legacyMigrationCompletedDefaultsKey)
+
+        ActivityLogger.log(
+            "store",
+            "legacy migration completed",
+            metadata: [
+                "copied_any": copiedAny ? "true" : "false",
+                "any_failure": anyFailure ? "true" : "false"
+            ]
+        )
+    }
+
+    private static func legacyContainerDirectoryURL() -> URL {
+        // Group Containers always live at
+        // ~/Library/Group Containers/<identifier>/ on macOS, regardless of
+        // sandbox state — there's no FileManager API that resolves a path
+        // for an identifier we no longer hold entitlements for, so build it
+        // directly from the user's home directory.
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Group Containers", isDirectory: true)
+            .appendingPathComponent(legacyAppGroupIdentifier, isDirectory: true)
+    }
+
     static func loadReadings() -> TrackerReadingsFile {
         loadReadingsUnlocked()
     }

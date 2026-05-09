@@ -26,6 +26,11 @@ struct MacosWidgetsStatsFromWebsiteApp: App {
 
         ActivityLogger.log("app", "launch")
 
+        // One-time copy of user data from the legacy unprefixed App Group
+        // container into the team-prefixed container adopted in 0.12.7.
+        // Must run before AppGroupStore() reads/writes the new container.
+        AppGroupStore.migrateLegacyAppGroupContainerIfNeeded()
+
         let store = AppGroupStore()
         _store = StateObject(wrappedValue: store)
         _backgroundScheduler = StateObject(wrappedValue: BackgroundScheduler(store: store))
