@@ -16,6 +16,14 @@ extension Notification.Name {
 final class MCPServer {
     static let shared = MCPServer()
 
+    // Single source of truth for the runtime marketing version: read from
+    // Bundle.main.infoDictionary at startup so the only place to bump the
+    // version is project.yml's MARKETING_VERSION setting (see settings.base).
+    // Cached as a static let so hot paths (initialize, debugDescribe) don't
+    // re-hit infoDictionary on every JSON-RPC call.
+    static let marketingVersion: String =
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
+
     private let socketQueue = DispatchQueue(label: "com.ethansk.macos-widgets-stats-from-website.mcp.socket", qos: .utility)
     private let sessionQueue = DispatchQueue(label: "com.ethansk.macos-widgets-stats-from-website.mcp.sessions", qos: .utility, attributes: .concurrent)
     private var socketFD: Int32 = -1
@@ -352,7 +360,7 @@ private final class MCPConnectionSession {
                 "protocolVersion": "2024-11-05",
                 "serverInfo": [
                     "name": "macos-widgets-stats-from-website",
-                    "version": "0.12.9"
+                    "version": MCPServer.marketingVersion
                 ],
                 "capabilities": [
                     "tools": [:]
@@ -748,7 +756,7 @@ private enum MCPToolDispatcher {
         return [
             "serverInfo": [
                 "name": "macos-widgets-stats-from-website",
-                "version": "0.12.9"
+                "version": MCPServer.marketingVersion
             ],
             "transport": context.transport == .unixSocket ? "unixSocket" : "stdio",
             "interactiveElementIdentification": context.supportsInteractiveBrowser ? "available" : "requires_app_socket",

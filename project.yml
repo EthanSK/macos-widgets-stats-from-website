@@ -15,6 +15,16 @@ settings:
     CODE_SIGN_STYLE: Automatic
     ENABLE_HARDENED_RUNTIME: YES
     CODE_SIGNING_ALLOWED: YES
+    # Single source of truth for the marketing version + CFBundleVersion build
+    # number. All targets inherit these via the per-target info.properties
+    # blocks below (CFBundleShortVersionString: $(MARKETING_VERSION),
+    # CFBundleVersion: $(CURRENT_PROJECT_VERSION)). To bump the version, edit
+    # ONLY these two values — the Swift binaries read CFBundleShortVersionString
+    # from Bundle.main.infoDictionary at runtime, so nothing else needs touching.
+    # Enforced by .githooks/pre-commit (see core.hooksPath in repo config) and
+    # by scripts/validate_release_metadata.py.
+    MARKETING_VERSION: "0.12.10"
+    CURRENT_PROJECT_VERSION: "1208"
 
 packages:
   Sparkle:
@@ -69,8 +79,8 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
-        CFBundleShortVersionString: "0.12.9"
-        CFBundleVersion: "1207"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleDocumentTypes:
           - CFBundleTypeName: macOS Widgets Stats from Website Selector Pack
             CFBundleTypeRole: Editor
@@ -140,8 +150,8 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
-        CFBundleShortVersionString: "0.12.9"
-        CFBundleVersion: "1207"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
@@ -169,6 +179,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-widgets-stats-from-website.cli
         INFOPLIST_FILE: MacosWidgetsStatsFromWebsite/Apps/CLI/Info.plist
         CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsite/Apps/CLI/MacosWidgetsStatsFromWebsiteCLI.entitlements
+        # Embed the Info.plist as a __TEXT,__info_plist section so the CLI
+        # tool can read CFBundleShortVersionString via Bundle.main.infoDictionary
+        # at runtime (single source of truth — see AGENTS.md).
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
     info:
       path: MacosWidgetsStatsFromWebsite/Apps/CLI/Info.plist
       properties:
@@ -178,8 +192,8 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
-        CFBundleShortVersionString: "0.12.9"
-        CFBundleVersion: "1207"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
     entitlements:
       path: MacosWidgetsStatsFromWebsite/Apps/CLI/MacosWidgetsStatsFromWebsiteCLI.entitlements

@@ -22,6 +22,10 @@ if arguments.first == "mcp-token" {
         exit(1)
     }
 } else {
-    print("macos-widgets-stats-from-website CLI v0.12.9")
+    // Read CFBundleShortVersionString from the embedded Info.plist (xcodebuild
+    // links the CLI Info.plist into the binary via INFOPLIST_FILE). Single
+    // source of truth lives in project.yml MARKETING_VERSION; see AGENTS.md.
+    let marketingVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
+    print("macos-widgets-stats-from-website CLI v\(marketingVersion)")
     print("Usage: macos-widgets-stats-from-website mcp-stdio | mcp-token")
 }

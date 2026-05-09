@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# pre-commit: enforce per-commit MARKETING_VERSION bump.
+#
+# Why: project.yml's settings.base.MARKETING_VERSION is the SINGLE source of
+# truth for the marketing version. Every commit that touches code or assets
+# is expected to bump that value (per the per-commit-bump policy documented
+# in AGENTS.md). This hook fails the commit if version-bearing files are
+# staged but MARKETING_VERSION matches the previous commit's value.
+#
+# Install: from the repo root run `git config core.hooksPath .githooks`.
+# Bypass for genuine non-version-affecting commits (rare): set
+# SKIP_VERSION_CHECK=1 in the environment when committing.
+
+set -euo pipefail
+
+if [[ "${SKIP_VERSION_CHECK:-0}" == "1" ]]; then
+    exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PROJECT_YML="$REPO_ROOT/project.yml"
+
+if [[ ! -f "$PROJECT_YML" ]]; then
+    # Repo doesn't have a project.yml (somehow) — nothing to enforce.
+    exit 0
+fi
+
+extract_marketing_version() {
+    local source="$1"
+    # Match `    MARKETING_VERSION: "x.y.z"` (any leading whitespace).
+    # Tolerant of no-match: returns empty without tripping `set -e` /
+    # pipefail (the case where HEAD's project.yml predates this
+    # single-source-of-truth refactor).
+    local matched
+    matched=$(grep -E '^[[:space:]]*MARKETING_VERSION:[[:space:]]*"[^"]+"' <<<"$source" || true)
+    if [[ -z "$matched" ]]; then
+        return 0
+    fi
+    sed -E 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"([^"]+)".*$/\1/' <<<"$matched" | head -n1
+}
+
+CURRENT_VERSION="$(extract_marketing_version "$(cat "$PROJECT_YML")")"
+
+if [[ -z "$CURRENT_VERSION" ]]; then
+    echo "pre-commit: ERROR — could not find MARKETING_VERSION in project.yml" >&2
+    echo "pre-commit: it must be defined under settings.base; see AGENTS.md" >&2
+    exit 1
+fi
+
+# Try to read the previous commit's version. If there's no prior commit
+# (e.g. initial repo state), skip the bump check.
+if ! git rev-parse --verify --quiet HEAD >/dev/null; then
+    echo "pre-commit: no prior commit — skipping version-bump check"
+    exit 0
+fi
+
+PREV_PROJECT_YML="$(git show HEAD:project.yml 2>/dev/null || true)"
+if [[ -z "$PREV_PROJECT_YML" ]]; then
+    # project.yml didn't exist in HEAD — first commit introducing it, allow.
+    exit 0
+fi
+
+PREV_VERSION="$(extract_marketing_version "$PREV_PROJECT_YML")"
+if [[ -z "$PREV_VERSION" ]]; then
+    # HEAD's project.yml had no MARKETING_VERSION — likely the commit
+    # introducing the single-source-of-truth refactor itself. Allow.
+    exit 0
+fi
+
+if [[ "$CURRENT_VERSION" != "$PREV_VERSION" ]]; then
+    # Bumped — happy path.
+    exit 0
+fi
+
+# Same version — only fail if version-bearing files are staged.
+STAGED="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [[ -z "$STAGED" ]]; then
+    exit 0
+fi
+
+# Files that DON'T require a version bump on their own.
+SKIP_PATTERNS=(
+    '^README\.md$'
+    '^AGENTS\.md$'
+    '^docs/'
+    '^\.github/'
+    '^\.githooks/'
+    '^\.gitignore$'
+    '^LICENSE$'
+    '^scripts/(prepare_release_metadata|update_appcast|validate_release_metadata|sign_update|ExportOptions)'
+    '^MacosWidgetsStatsFromWebsite\.xcodeproj/'
+)
+
+needs_bump=0
+while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    skip=0
+    for pattern in "${SKIP_PATTERNS[@]}"; do
+        if [[ "$path" =~ $pattern ]]; then
+            skip=1
+            break
+        fi
+    done
+    if [[ "$skip" == "0" ]]; then
+        needs_bump=1
+        break
+    fi
+done <<<"$STAGED"
+
+if [[ "$needs_bump" == "1" ]]; then
+    cat >&2 <<EOF
+pre-commit: ERROR — version not bumped.
+
+The staged commit modifies code/asset files but project.yml's
+MARKETING_VERSION is still "$CURRENT_VERSION" (same as HEAD).
+
+Bump the patch number in project.yml settings.base before committing:
+
+    MARKETING_VERSION: "$CURRENT_VERSION"  ->  "<bumped>"
+
+Then \`xcodegen\` to regenerate Info.plists (placeholders are unchanged but
+the post-gen hook may touch capabilities), stage project.yml + the plists,
+and re-commit.
+
+To bypass for a genuine non-shipping change, set SKIP_VERSION_CHECK=1.
+EOF
+    exit 1
+fi
+
+exit 0

@@ -140,6 +140,23 @@ def write_key_values(path: str | None, values: dict[str, str]) -> None:
             handle.write(f"{key}={value}\n")
 
 
+def _read_yaml_settings() -> tuple[str, str]:
+    """Read MARKETING_VERSION and CURRENT_PROJECT_VERSION from project.yml.
+
+    Single source of truth lives in settings.base — Info.plists carry the
+    literal $(MARKETING_VERSION) / $(CURRENT_PROJECT_VERSION) placeholders
+    that xcodebuild substitutes at build time. See AGENTS.md.
+    """
+    project_yml = (ROOT / "project.yml").read_text(encoding="utf-8")
+    version_match = re.search(r"^\s*MARKETING_VERSION:\s*\"([^\"]+)\"", project_yml, re.MULTILINE)
+    build_match = re.search(r"^\s*CURRENT_PROJECT_VERSION:\s*\"([^\"]+)\"", project_yml, re.MULTILINE)
+    if not version_match:
+        fail("project.yml is missing settings.base.MARKETING_VERSION")
+    if not build_match:
+        fail("project.yml is missing settings.base.CURRENT_PROJECT_VERSION")
+    return version_match.group(1), build_match.group(1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply-plists", action="store_true", help="patch Info.plists to RELEASE_BUILD_NUMBER")
@@ -147,14 +164,12 @@ def main() -> int:
     parser.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT"), help="append release outputs to this file")
     args = parser.parse_args()
 
-    main_plist = read_plist(INFO_PLISTS[0])
-    version = str(main_plist.get("CFBundleShortVersionString", "")).strip()
-    base_build_raw = str(main_plist.get("CFBundleVersion", "")).strip()
+    version, base_build_raw = _read_yaml_settings()
 
     if not SEMVER_RE.match(version):
-        fail(f"CFBundleShortVersionString must be x.y.z, got {version!r}")
+        fail(f"MARKETING_VERSION must be x.y.z, got {version!r}")
     if not base_build_raw.isdigit():
-        fail(f"CFBundleVersion must be numeric, got {base_build_raw!r}")
+        fail(f"CURRENT_PROJECT_VERSION must be numeric, got {base_build_raw!r}")
 
     base_build = int(base_build_raw)
     values = release_values_for_ref(version, base_build)

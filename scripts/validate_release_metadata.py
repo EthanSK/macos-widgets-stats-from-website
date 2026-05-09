@@ -103,33 +103,76 @@ def check_repo(root: Path) -> None:
             fail(f"update_appcast.py is missing expected validation/reference {snippet!r}")
 
 
+def _read_marketing_version_and_build(project_yml: str) -> tuple[str, str]:
+    """Read MARKETING_VERSION and CURRENT_PROJECT_VERSION from project.yml.
+
+    These live in settings.base and are the single source of truth for the
+    repo's marketing version + Sparkle build number. Every Info.plist
+    inherits via $(MARKETING_VERSION) / $(CURRENT_PROJECT_VERSION) placeholders
+    written by xcodegen and substituted at build time by xcodebuild.
+    """
+    version_match = re.search(r"^\s*MARKETING_VERSION:\s*\"([^\"]+)\"", project_yml, re.MULTILINE)
+    build_match = re.search(r"^\s*CURRENT_PROJECT_VERSION:\s*\"([^\"]+)\"", project_yml, re.MULTILINE)
+    if not version_match:
+        fail("project.yml is missing settings.base.MARKETING_VERSION (single source of truth)")
+    if not build_match:
+        fail("project.yml is missing settings.base.CURRENT_PROJECT_VERSION (Sparkle build number)")
+    return version_match.group(1), build_match.group(1)
+
+
 def check_versions(root: Path) -> None:
-    versions: list[str] = []
-    builds: list[str] = []
+    project_yml = read_text(root / "project.yml")
+    version, build = _read_marketing_version_and_build(project_yml)
+
+    if not SEMVER_RE.match(version):
+        fail(f"project.yml MARKETING_VERSION must be x.y.z, got {version!r}")
+    if not build.isdigit() or int(build) <= 0:
+        fail(f"project.yml CURRENT_PROJECT_VERSION must be a positive integer, got {build!r}")
+
+    # Every Info.plist must inherit via $(MARKETING_VERSION) /
+    # $(CURRENT_PROJECT_VERSION) placeholders so xcodebuild substitutes the
+    # canonical values at build time. Hard-coded literal versions are not
+    # allowed (they were the bug that prompted this single-source-of-truth
+    # refactor — see AGENTS.md).
     for relative in INFO_PLISTS:
         with (root / relative).open("rb") as handle:
             payload = plistlib.load(handle)
-        version = str(payload.get("CFBundleShortVersionString", "")).strip()
-        build = str(payload.get("CFBundleVersion", "")).strip()
-        if not SEMVER_RE.match(version):
-            fail(f"{relative} has invalid CFBundleShortVersionString {version!r}")
-        if not build.isdigit() or int(build) <= 0:
-            fail(f"{relative} has invalid CFBundleVersion {build!r}")
-        versions.append(version)
-        builds.append(build)
+        plist_version = str(payload.get("CFBundleShortVersionString", "")).strip()
+        plist_build = str(payload.get("CFBundleVersion", "")).strip()
+        if plist_version != "$(MARKETING_VERSION)":
+            fail(
+                f"{relative} CFBundleShortVersionString must be the literal "
+                f"$(MARKETING_VERSION) placeholder, got {plist_version!r}. "
+                "Run `xcodegen` after editing project.yml and DO NOT hand-edit "
+                "Info.plist version fields."
+            )
+        if plist_build != "$(CURRENT_PROJECT_VERSION)":
+            fail(
+                f"{relative} CFBundleVersion must be the literal "
+                f"$(CURRENT_PROJECT_VERSION) placeholder, got {plist_build!r}."
+            )
 
-    if len(set(versions)) != 1:
-        fail(f"Info.plist marketing versions differ: {versions}")
-    if len(set(builds)) != 1:
-        fail(f"Info.plist build numbers differ: {builds}")
-
-    project_yml = read_text(root / "project.yml")
-    yml_versions = re.findall(r"CFBundleShortVersionString:\s*\"([^\"]+)\"", project_yml)
-    yml_builds = re.findall(r"CFBundleVersion:\s*\"([^\"]+)\"", project_yml)
-    if not yml_versions or set(yml_versions) != {versions[0]}:
-        fail(f"project.yml CFBundleShortVersionString values are not aligned to {versions[0]}")
-    if not yml_builds or set(yml_builds) != {builds[0]}:
-        fail(f"project.yml CFBundleVersion values are not aligned to {builds[0]}")
+    # Reject any leftover per-target literal CFBundleShortVersionString or
+    # CFBundleVersion values in project.yml — they would shadow the
+    # settings.base source of truth.
+    yml_version_literals = re.findall(
+        r"CFBundleShortVersionString:\s*\"(?!\$\(MARKETING_VERSION\))([^\"]+)\"",
+        project_yml,
+    )
+    if yml_version_literals:
+        fail(
+            "project.yml has per-target literal CFBundleShortVersionString "
+            f"values {yml_version_literals!r}; replace with $(MARKETING_VERSION)"
+        )
+    yml_build_literals = re.findall(
+        r"CFBundleVersion:\s*\"(?!\$\(CURRENT_PROJECT_VERSION\))([^\"]+)\"",
+        project_yml,
+    )
+    if yml_build_literals:
+        fail(
+            "project.yml has per-target literal CFBundleVersion values "
+            f"{yml_build_literals!r}; replace with $(CURRENT_PROJECT_VERSION)"
+        )
 
     main_plist = plistlib.load((root / INFO_PLISTS[0]).open("rb"))
     feed_url = str(main_plist.get("SUFeedURL", ""))
