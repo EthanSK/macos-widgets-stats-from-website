@@ -124,13 +124,42 @@ final class ChromeBrowserProfile {
         let configuration = configuration(profileName: profileName)
         if isCDPReachable(configuration: configuration) {
             if foreground {
+                // Foreground (Identify-in-Chrome) callers need a VISIBLE Chrome window.
+                // The background scraper spawns headless Chrome on the same CDP port; if
+                // that headless instance is alive when the user clicks Identify, we MUST
+                // tear it down and spawn a headed instance — otherwise CDP is reachable
+                // but no window ever appears (the failure mode that caused v0.12.10's
+                // "identify is active but no Chrome opens" bug).
+                if isExistingInstanceHeadless(configuration: configuration) {
+                    ActivityLogger.log("browser", "tearing down headless Chrome to spawn headed instance for foreground identify", metadata: [
+                        "profile": configuration.profileName,
+                        "port": "\(configuration.cdpPort)"
+                    ])
+                    terminateHeadlessInstance(configuration: configuration) { [weak self] in
+                        self?.spawnNewBrowser(configuration: configuration, foreground: true, completion: completion)
+                    }
+                    return
+                }
+
                 markUserVisible(configuration: configuration)
                 activateDedicatedBrowser(configuration: configuration)
+                ActivityLogger.log("browser", "reusing existing headed Chrome instance", metadata: [
+                    "profile": configuration.profileName,
+                    "port": "\(configuration.cdpPort)"
+                ])
             }
             completion(.success(configuration))
             return
         }
 
+        spawnNewBrowser(configuration: configuration, foreground: foreground, completion: completion)
+    }
+
+    private func spawnNewBrowser(
+        configuration: ChromeBrowserLaunchConfiguration,
+        foreground: Bool,
+        completion: @escaping (Result<ChromeBrowserLaunchConfiguration, Error>) -> Void
+    ) {
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -139,10 +168,129 @@ final class ChromeBrowserProfile {
                 try self.launch(browser: browser, configuration: configuration, foreground: foreground)
                 self.waitUntilCDPReachable(configuration: configuration, deadline: Date().addingTimeInterval(12), completion: completion)
             } catch {
+                ActivityLogger.log("browser", "launch failed", metadata: [
+                    "profile": configuration.profileName,
+                    "port": "\(configuration.cdpPort)",
+                    "foreground": foreground ? "true" : "false",
+                    "error": error.localizedDescription
+                ])
                 DispatchQueue.main.async {
                     completion(.failure(error))
                 }
             }
+        }
+    }
+
+    /// Returns true if the dedicated Chrome instance currently serving this CDP port
+    /// was launched as a background headless instance (via `--headless=new`). Detected
+    /// either from our in-process tracking (the headless was spawned in this app session)
+    /// or by scanning `ps` for the dedicated user-data-dir + `--headless` argv.
+    private func isExistingInstanceHeadless(configuration: ChromeBrowserLaunchConfiguration) -> Bool {
+        let port = configuration.cdpPort
+
+        let trackedHeadless: Bool = queue.sync {
+            // If we have a tracked foreground process/application for this port, the live
+            // instance is headed — even if a stale headless tracker is also present.
+            if foregroundLaunchedProcesses[port] != nil || foregroundLaunchedApplications[port] != nil {
+                return false
+            }
+            return backgroundLaunchedProcesses[port] != nil || backgroundLaunchedApplications[port] != nil
+        }
+
+        if trackedHeadless {
+            return true
+        }
+
+        // No in-process tracking (e.g. the dedicated Chrome was started by a previous app
+        // session). Fall back to a `ps` argv probe for `--headless` on the dedicated
+        // user-data-dir so we don't reuse a stale headless from a prior run.
+        return findDedicatedHeadlessChromeViaPS(configuration: configuration)
+    }
+
+    private func findDedicatedHeadlessChromeViaPS(configuration: ChromeBrowserLaunchConfiguration) -> Bool {
+        let userDataNeedle = "--user-data-dir=\(configuration.userDataDirectory.path)"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps", isDirectory: false)
+        process.arguments = ["-axwwo", "pid=,command="]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+        process.waitUntilExit()
+
+        guard let outputData = try? pipe.fileHandleForReading.readToEnd(),
+              let output = String(data: outputData, encoding: .utf8) else {
+            return false
+        }
+
+        for line in output.split(separator: "\n") {
+            let command = String(line)
+            guard command.contains(userDataNeedle) else { continue }
+            // Skip helper renderer/utility/gpu PIDs — they share argv with the parent.
+            if command.contains("--type=") { continue }
+            if command.contains("--headless") { return true }
+        }
+        return false
+    }
+
+    private func terminateHeadlessInstance(
+        configuration: ChromeBrowserLaunchConfiguration,
+        completion: @escaping () -> Void
+    ) {
+        let port = configuration.cdpPort
+
+        queue.async { [weak self] in
+            guard let self else {
+                DispatchQueue.global(qos: .userInitiated).async { completion() }
+                return
+            }
+
+            // Terminate any in-process tracked headless first.
+            let trackedProcess = self.backgroundLaunchedProcesses.removeValue(forKey: port)
+            let trackedApplication = self.backgroundLaunchedApplications.removeValue(forKey: port)
+            self.backgroundUseCounts[port] = nil
+
+            if let trackedProcess, trackedProcess.isRunning {
+                trackedProcess.terminate()
+            }
+            if let trackedApplication, !trackedApplication.isTerminated {
+                DispatchQueue.main.async {
+                    trackedApplication.terminate()
+                }
+            }
+
+            // For untracked-but-running headless (started in a previous app session),
+            // resolve via ps and SIGTERM the parent.
+            if let pid = self.findDedicatedBrowserPID(configuration: configuration) {
+                kill(pid, SIGTERM)
+            }
+
+            // Wait briefly for the CDP port to actually go down so the subsequent
+            // launch sees a non-reachable port. waitUntilCDPGone polls every 100ms
+            // up to 3s.
+            self.waitUntilCDPGone(configuration: configuration, deadline: Date().addingTimeInterval(3)) {
+                completion()
+            }
+        }
+    }
+
+    private func waitUntilCDPGone(
+        configuration: ChromeBrowserLaunchConfiguration,
+        deadline: Date,
+        completion: @escaping () -> Void
+    ) {
+        if !isCDPReachable(configuration: configuration) || Date() >= deadline {
+            completion()
+            return
+        }
+
+        queue.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.waitUntilCDPGone(configuration: configuration, deadline: deadline, completion: completion)
         }
     }
 
@@ -337,7 +485,31 @@ final class ChromeBrowserProfile {
         process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+
+        // Log unexpected process termination so silent crashes are visible. CDP
+        // unreachability + this log line together pinpoint the failure mode.
+        let cdpPortString = "\(configuration.cdpPort)"
+        let profileNameForLog = configuration.profileName
+        let foregroundForLog = foreground
+        process.terminationHandler = { proc in
+            ActivityLogger.log("browser", "Chrome process terminated", metadata: [
+                "profile": profileNameForLog,
+                "port": cdpPortString,
+                "foreground": foregroundForLog ? "true" : "false",
+                "exit": "\(proc.terminationStatus)",
+                "reason": "\(proc.terminationReason.rawValue)"
+            ])
+        }
+
         try process.run()
+
+        ActivityLogger.log("browser", foreground ? "spawned dedicated Chrome instance" : "launched headless app-owned Chrome", metadata: [
+            "profile": configuration.profileName,
+            "port": "\(configuration.cdpPort)",
+            "executable": executableURL.path,
+            "userDataDir": configuration.userDataDirectory.path,
+            "pid": "\(process.processIdentifier)"
+        ])
 
         if foreground {
             markUserVisible(configuration: configuration)
@@ -358,11 +530,6 @@ final class ChromeBrowserProfile {
         } else {
             backgroundLaunchedProcesses[configuration.cdpPort] = process
         }
-
-        ActivityLogger.log("browser", foreground ? "spawned dedicated Chrome instance" : "launched headless app-owned Chrome", metadata: [
-            "profile": configuration.profileName,
-            "port": "\(configuration.cdpPort)"
-        ])
     }
 
     private static func executableURL(forAppBundle appURL: URL) throws -> URL {
