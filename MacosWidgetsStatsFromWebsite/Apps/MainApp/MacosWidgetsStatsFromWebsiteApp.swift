@@ -26,6 +26,16 @@ struct MacosWidgetsStatsFromWebsiteApp: App {
 
         ActivityLogger.log("app", "launch")
 
+        // Single-instance enforcement: terminate any prior copy of this app
+        // (different PID, same bundle identifier) before we touch the App
+        // Group container or migrate legacy data. This handles the
+        // Xcode/`./scripts/build.sh` iteration loop where the freshly built
+        // bundle lives at a different on-disk path from the previously
+        // launched one — AppKit's normal reopen flow doesn't fire across
+        // bundle paths, so we'd otherwise end up with two instances fighting
+        // over the App Group container and MCP socket.
+        AppDelegate.terminatePriorInstancesIfNeeded()
+
         // One-time copy of user data from the legacy unprefixed App Group
         // container into the team-prefixed container adopted in 0.12.7.
         // Must run before AppGroupStore() reads/writes the new container.

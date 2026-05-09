@@ -9,6 +9,75 @@ import AppKit
 import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    /// Bundle identifier of the main app. Hardcoded here so the
+    /// single-instance enforcement runs even before `Bundle.main` is fully
+    /// resolved (it is, but keeping this as a constant makes the intent
+    /// explicit and avoids a force-unwrap on `Bundle.main.bundleIdentifier`
+    /// during very-early startup).
+    static let mainBundleIdentifier = "com.ethansk.macos-widgets-stats-from-website"
+
+    /// Terminate any other running copies of this app that share our bundle
+    /// identifier but have a different PID from ourselves.
+    ///
+    /// Why: when iterating in Xcode (or via `./scripts/build.sh`), each build
+    /// produces a fresh `.app` bundle at a *different* on-disk path. Launching
+    /// the freshly built bundle does NOT cause AppKit's normal reopen flow
+    /// (`applicationShouldHandleReopen`) to fire on the prior instance —
+    /// macOS treats them as two separate apps that just happen to share a
+    /// bundle ID, and you end up with two copies of the app fighting over the
+    /// shared App Group container, MCP socket, dock icon, menu bar, etc.
+    ///
+    /// This helper enumerates `NSRunningApplication` instances matching the
+    /// main bundle ID, filters out our own PID, and asks each one to
+    /// terminate gracefully (falling back to `forceTerminate()` if a stuck
+    /// instance is still alive after a short grace period).
+    ///
+    /// This is intentionally called from `App.init()` (before the
+    /// `AppGroupStore` is constructed) so the new instance has uncontended
+    /// access to the App Group container by the time it reads from disk.
+    /// `applicationShouldHandleReopen` is still kept for the
+    /// same-bundle-relaunch case where a single-window focus is the right
+    /// behaviour.
+    static func terminatePriorInstancesIfNeeded() {
+        let myPID = NSRunningApplication.current.processIdentifier
+        let others = NSRunningApplication
+            .runningApplications(withBundleIdentifier: mainBundleIdentifier)
+            .filter { $0.processIdentifier != myPID && !$0.isTerminated }
+
+        guard !others.isEmpty else { return }
+
+        for other in others {
+            NSLog(
+                "[startup] terminating prior MacosWidgetsStatsFromWebsite instance PID=%d (bundleURL=%@)",
+                other.processIdentifier,
+                other.bundleURL?.path ?? "<unknown>"
+            )
+            // Graceful first; macOS sends an AppleEvent quit which lets the
+            // old instance run `applicationWillTerminate` (which closes the
+            // MCP socket and tears down browsers cleanly).
+            _ = other.terminate()
+        }
+
+        // Wait briefly for them to die so the App Group container and
+        // MCP socket are unencumbered before we proceed. Cap at ~2s so a
+        // wedged prior instance never blocks the new launch indefinitely;
+        // anything still alive after the grace period gets force-killed.
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline {
+            let stillAlive = others.contains { !$0.isTerminated }
+            if !stillAlive { break }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+
+        for other in others where !other.isTerminated {
+            NSLog(
+                "[startup] force-terminating stuck prior instance PID=%d",
+                other.processIdentifier
+            )
+            _ = other.forceTerminate()
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         TrackerAttentionNotifier.shared.configure()
