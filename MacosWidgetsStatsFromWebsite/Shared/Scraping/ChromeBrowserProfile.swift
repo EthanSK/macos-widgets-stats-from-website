@@ -125,7 +125,7 @@ final class ChromeBrowserProfile {
         if isCDPReachable(configuration: configuration) {
             if foreground {
                 markUserVisible(configuration: configuration)
-                activateBrowserIfPossible()
+                activateDedicatedBrowser(configuration: configuration)
             }
             completion(.success(configuration))
             return
@@ -316,71 +316,53 @@ final class ChromeBrowserProfile {
     private func launch(browser: ResolvedBrowser, configuration: ChromeBrowserLaunchConfiguration, foreground: Bool) throws {
         let arguments = buildChromeLaunchArguments(configuration: configuration, headless: !foreground) + ["about:blank"]
 
+        // We always exec the Chrome binary directly (bypassing LaunchServices) so a
+        // pre-existing personal Chrome session cannot intercept the launch and absorb
+        // our flags. LaunchServices' `NSWorkspace.shared.openApplication` with
+        // `createsNewApplicationInstance = true` is unreliable here: on some macOS+Chrome
+        // combinations the open event still routes into the user's already-running
+        // personal Chrome (which uses the default user-data-dir), instead of spawning
+        // our dedicated `--user-data-dir=<app-group>/Browser/...` instance.
+        // Direct exec guarantees a separate child process owning our user-data-dir.
+        let executableURL: URL
         switch browser.kind {
         case .appBundle(let appURL):
-            guard foreground else {
-                try launchHeadlessProcess(
-                    executableURL: try Self.executableURL(forAppBundle: appURL),
-                    arguments: arguments,
-                    configuration: configuration
-                )
-                break
-            }
-
-            let openConfiguration = NSWorkspace.OpenConfiguration()
-            openConfiguration.arguments = arguments
-            openConfiguration.activates = foreground
-            openConfiguration.createsNewApplicationInstance = true
-            markUserVisible(configuration: configuration)
-
-            NSWorkspace.shared.openApplication(at: appURL, configuration: openConfiguration) { [weak self] application, error in
-                if let error {
-                    ActivityLogger.log("browser", "Chrome app launch callback reported failure", metadata: ["error": error.localizedDescription])
-                    return
-                }
-
-                guard let application else {
-                    return
-                }
-
-                self?.queue.async { [weak self] in
-                    guard let self else { return }
-                    self.foregroundLaunchedApplications[configuration.cdpPort] = application
-                }
-            }
-        case .executable(let executableURL):
-            if foreground {
-                let process = Process()
-                process.executableURL = executableURL
-                process.arguments = arguments
-                process.standardOutput = FileHandle.nullDevice
-                process.standardError = FileHandle.nullDevice
-                try process.run()
-                markUserVisible(configuration: configuration)
-                foregroundLaunchedProcesses[configuration.cdpPort] = process
-            } else {
-                try launchHeadlessProcess(executableURL: executableURL, arguments: arguments, configuration: configuration)
-            }
+            executableURL = try Self.executableURL(forAppBundle: appURL)
+        case .executable(let directExecutable):
+            executableURL = directExecutable
         }
 
-        ActivityLogger.log("browser", foreground ? "opened visible Chrome profile" : "launched headless app-owned Chrome", metadata: [
-            "profile": configuration.profileName,
-            "port": "\(configuration.cdpPort)"
-        ])
-    }
-
-    private func launchHeadlessProcess(
-        executableURL: URL,
-        arguments: [String],
-        configuration: ChromeBrowserLaunchConfiguration
-    ) throws {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
-        backgroundLaunchedProcesses[configuration.cdpPort] = process
+
+        if foreground {
+            markUserVisible(configuration: configuration)
+            foregroundLaunchedProcesses[configuration.cdpPort] = process
+
+            // Resolve the NSRunningApplication so we can later activate ONLY this
+            // dedicated instance, never the user's personal Chrome.
+            let pid = process.processIdentifier
+            queue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self else { return }
+                if let application = NSRunningApplication(processIdentifier: pid) {
+                    self.foregroundLaunchedApplications[configuration.cdpPort] = application
+                    DispatchQueue.main.async {
+                        application.activate(options: [.activateIgnoringOtherApps])
+                    }
+                }
+            }
+        } else {
+            backgroundLaunchedProcesses[configuration.cdpPort] = process
+        }
+
+        ActivityLogger.log("browser", foreground ? "spawned dedicated Chrome instance" : "launched headless app-owned Chrome", metadata: [
+            "profile": configuration.profileName,
+            "port": "\(configuration.cdpPort)"
+        ])
     }
 
     private static func executableURL(forAppBundle appURL: URL) throws -> URL {
@@ -838,18 +820,95 @@ final class ChromeBrowserProfile {
         return nil
     }
 
-    private func activateBrowserIfPossible() {
-        guard let browser = try? resolveBrowser(),
-              case .appBundle(let appURL) = browser.kind,
-              let bundleIdentifier = Bundle(url: appURL)?.bundleIdentifier else {
+    /// Bring ONLY the dedicated Chrome instance for `configuration` to the front —
+    /// never touch the user's personal Chrome session.
+    ///
+    /// Resolution order:
+    ///   1. The tracked `NSRunningApplication` from a foreground launch in this app session.
+    ///   2. A scan of running processes whose argv contains the dedicated `--user-data-dir`.
+    ///   3. No-op (we never blanket-activate by bundle id, since that would yank the user's
+    ///      personal Chrome windows forward — see regression introduced in commit f78e310).
+    private func activateDedicatedBrowser(configuration: ChromeBrowserLaunchConfiguration) {
+        let port = configuration.cdpPort
+        let trackedApplication: NSRunningApplication? = queue.sync {
+            foregroundLaunchedApplications[port] ?? backgroundLaunchedApplications[port]
+        }
+
+        if let application = trackedApplication, !application.isTerminated {
+            DispatchQueue.main.async {
+                application.activate(options: [.activateIgnoringOtherApps])
+            }
             return
         }
 
-        DispatchQueue.main.async {
-            for application in NSWorkspace.shared.runningApplications where application.bundleIdentifier == bundleIdentifier {
+        // No tracked app (e.g. dedicated Chrome was started in a previous app session and
+        // is still alive serving the CDP port). Find the PID whose argv references our
+        // dedicated user-data-dir so we can activate that specific instance.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self,
+                  let pid = self.findDedicatedBrowserPID(configuration: configuration),
+                  let application = NSRunningApplication(processIdentifier: pid) else {
+                return
+            }
+
+            self.queue.async { [weak self] in
+                self?.foregroundLaunchedApplications[port] = application
+            }
+
+            DispatchQueue.main.async {
                 application.activate(options: [.activateIgnoringOtherApps])
             }
         }
+    }
+
+    /// Scan `ps` for a process whose argv contains `--user-data-dir=<configuration.userDataDirectory.path>`.
+    /// This matches the dedicated Chrome instance even when the user's personal Chrome is running
+    /// concurrently, because personal Chrome uses Chrome's default user-data-dir
+    /// (`~/Library/Application Support/Google/Chrome`), never our app-group path.
+    private func findDedicatedBrowserPID(configuration: ChromeBrowserLaunchConfiguration) -> pid_t? {
+        let needle = "--user-data-dir=\(configuration.userDataDirectory.path)"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps", isDirectory: false)
+        process.arguments = ["-axwwo", "pid=,command="]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        process.waitUntilExit()
+
+        let outputData: Data
+        do {
+            outputData = (try pipe.fileHandleForReading.readToEnd()) ?? Data()
+        } catch {
+            return nil
+        }
+        guard let output = String(data: outputData, encoding: .utf8) else {
+            return nil
+        }
+
+        for line in output.split(separator: "\n") {
+            let trimmed = String(line).trimmingCharacters(in: .whitespaces)
+            guard let space = trimmed.firstIndex(where: { $0 == " " || $0 == "\t" }) else { continue }
+            let pidString = String(trimmed[..<space])
+            let command = String(trimmed[space...])
+            guard command.contains(needle) else { continue }
+            // The "main" Chrome process has the dedicated user-data-dir argv;
+            // helper renderers/utility processes use --user-data-dir but typically also pass
+            // --type=renderer / --type=utility / --type=gpu-process. Skip helpers so we
+            // activate the parent (the one with the visible window).
+            if command.contains("--type=") {
+                continue
+            }
+            if let pid = pid_t(pidString.trimmingCharacters(in: .whitespaces)) {
+                return pid
+            }
+        }
+        return nil
     }
 
     private func cdpPort(for safeProfileName: String) -> Int {

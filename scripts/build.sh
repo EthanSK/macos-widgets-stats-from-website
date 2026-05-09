@@ -42,7 +42,7 @@ xcodebuild \
   -scheme MacosWidgetsStatsFromWebsite \
   -configuration Debug \
   -derivedDataPath "$DERIVED_DATA_PATH" \
-  "${XCODEBUILD_SIGNING_FLAGS[@]}" \
+  ${XCODEBUILD_SIGNING_FLAGS[@]+"${XCODEBUILD_SIGNING_FLAGS[@]}"} \
   ENABLE_DEBUG_DYLIB=NO \
   build
 
