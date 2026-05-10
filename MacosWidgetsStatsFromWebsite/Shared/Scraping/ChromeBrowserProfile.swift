@@ -184,7 +184,8 @@ final class ChromeBrowserProfile {
     /// Returns true if the dedicated Chrome instance currently serving this CDP port
     /// was launched as a background headless instance (via `--headless=new`). Detected
     /// either from our in-process tracking (the headless was spawned in this app session)
-    /// or by scanning `ps` for the dedicated user-data-dir + `--headless` argv.
+    /// or from the Chrome DevTools `/json/version` User-Agent exposed by the
+    /// dedicated CDP port. `ps` is only a best-effort fallback for unsandboxed builds.
     private func isExistingInstanceHeadless(configuration: ChromeBrowserLaunchConfiguration) -> Bool {
         let port = configuration.cdpPort
 
@@ -202,9 +203,41 @@ final class ChromeBrowserProfile {
         }
 
         // No in-process tracking (e.g. the dedicated Chrome was started by a previous app
-        // session). Fall back to a `ps` argv probe for `--headless` on the dedicated
-        // user-data-dir so we don't reuse a stale headless from a prior run.
+        // session). Probe the dedicated CDP endpoint first: Release builds are sandboxed
+        // and cannot exec `/bin/ps`, but they can still talk to the Chrome instance they
+        // launched on localhost.
+        if let cdpHeadless = findDedicatedHeadlessChromeViaCDP(configuration: configuration) {
+            return cdpHeadless
+        }
+
+        // Best-effort fallback for unsandboxed/dev contexts where CDP did not return
+        // readable version metadata.
         return findDedicatedHeadlessChromeViaPS(configuration: configuration)
+    }
+
+    private func findDedicatedHeadlessChromeViaCDP(configuration: ChromeBrowserLaunchConfiguration) -> Bool? {
+        guard let versionInfo = Self.cdpVersionInfo(configuration: configuration) else {
+            ActivityLogger.log("browser", "headless-detection CDP probe failed", metadata: [
+                "profile": configuration.profileName,
+                "port": "\(configuration.cdpPort)"
+            ])
+            return nil
+        }
+
+        let browser = versionInfo["Browser"] as? String ?? ""
+        let userAgent = versionInfo["User-Agent"] as? String ?? ""
+        let isHeadless = browser.localizedCaseInsensitiveContains("HeadlessChrome")
+            || userAgent.localizedCaseInsensitiveContains("HeadlessChrome")
+
+        ActivityLogger.log("browser", "headless-detection CDP probe", metadata: [
+            "profile": configuration.profileName,
+            "port": "\(configuration.cdpPort)",
+            "browser": browser,
+            "userAgentContainsHeadless": userAgent.localizedCaseInsensitiveContains("HeadlessChrome") ? "true" : "false",
+            "result": isHeadless ? "headless" : "headed"
+        ])
+
+        return isHeadless
     }
 
     private func findDedicatedHeadlessChromeViaPS(configuration: ChromeBrowserLaunchConfiguration) -> Bool {
@@ -332,17 +365,83 @@ final class ChromeBrowserProfile {
             }
 
             // For untracked-but-running headless (started in a previous app session),
-            // resolve via ps and SIGTERM the parent.
-            if let pid = self.findDedicatedBrowserPID(configuration: configuration) {
-                kill(pid, SIGTERM)
-            }
+            // ask Chrome to close over CDP first. This works in the Release sandbox,
+            // where execing `/bin/ps` is denied.
+            self.requestBrowserCloseViaCDP(configuration: configuration) { [weak self] in
+                guard let self else {
+                    DispatchQueue.global(qos: .userInitiated).async { completion() }
+                    return
+                }
 
-            // Wait briefly for the CDP port to actually go down so the subsequent
-            // launch sees a non-reachable port. waitUntilCDPGone polls every 100ms
-            // up to 3s.
-            self.waitUntilCDPGone(configuration: configuration, deadline: Date().addingTimeInterval(3)) {
-                completion()
+                self.queue.async {
+                    // Non-sandbox fallback: if CDP close did not make the port go away,
+                    // resolve via ps and SIGTERM the parent.
+                    if self.isCDPReachable(configuration: configuration),
+                       let pid = self.findDedicatedBrowserPID(configuration: configuration) {
+                        kill(pid, SIGTERM)
+                    }
+
+                    // Wait briefly for the CDP port to actually go down so the subsequent
+                    // launch sees a non-reachable port. waitUntilCDPGone polls every 100ms
+                    // up to 3s.
+                    self.waitUntilCDPGone(configuration: configuration, deadline: Date().addingTimeInterval(3)) {
+                        completion()
+                    }
+                }
             }
+        }
+    }
+
+    private func requestBrowserCloseViaCDP(
+        configuration: ChromeBrowserLaunchConfiguration,
+        completion: @escaping () -> Void
+    ) {
+        guard let webSocketURL = Self.cdpBrowserWebSocketURL(configuration: configuration) else {
+            completion()
+            return
+        }
+
+        let client = ChromeCDPClient(webSocketURL: webSocketURL)
+        let lock = NSLock()
+        var didFinish = false
+
+        @discardableResult
+        func markFinished() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !didFinish else { return false }
+            didFinish = true
+            return true
+        }
+
+        client.connect()
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
+            guard markFinished() else { return }
+            ActivityLogger.log("browser", "Chrome CDP close request timed out", metadata: [
+                "profile": configuration.profileName,
+                "port": "\(configuration.cdpPort)"
+            ])
+            client.close()
+            completion()
+        }
+
+        client.send(method: "Browser.close") { result in
+            guard markFinished() else { return }
+            switch result {
+            case .success:
+                ActivityLogger.log("browser", "requested Chrome close over CDP", metadata: [
+                    "profile": configuration.profileName,
+                    "port": "\(configuration.cdpPort)"
+                ])
+            case .failure(let error):
+                ActivityLogger.log("browser", "Chrome CDP close request failed", metadata: [
+                    "profile": configuration.profileName,
+                    "port": "\(configuration.cdpPort)",
+                    "error": error.localizedDescription
+                ])
+            }
+            client.close()
+            completion()
         }
     }
 
@@ -646,13 +745,27 @@ final class ChromeBrowserProfile {
     }
 
     private func isCDPReachable(configuration: ChromeBrowserLaunchConfiguration) -> Bool {
+        guard let json = Self.cdpVersionInfo(configuration: configuration) else { return false }
+
+        return (json["Browser"] as? String)?.isEmpty == false || (json["webSocketDebuggerUrl"] as? String)?.isEmpty == false
+    }
+
+    private static func cdpVersionInfo(configuration: ChromeBrowserLaunchConfiguration) -> [String: Any]? {
         guard let url = URL(string: "/json/version", relativeTo: configuration.cdpURL)?.absoluteURL,
               let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return false
+            return nil
         }
 
-        return (json["Browser"] as? String)?.isEmpty == false || (json["webSocketDebuggerUrl"] as? String)?.isEmpty == false
+        return json
+    }
+
+    private static func cdpBrowserWebSocketURL(configuration: ChromeBrowserLaunchConfiguration) -> URL? {
+        guard let webSocketString = cdpVersionInfo(configuration: configuration)?["webSocketDebuggerUrl"] as? String else {
+            return nil
+        }
+
+        return URL(string: webSocketString)
     }
 
     private func createTargetRequest(
