@@ -614,7 +614,29 @@ final class ChromeBrowserProfile {
             "--disable-features=Translate,MediaRouter",
             "--disable-session-crashed-bubble",
             "--hide-crash-restore-bubble",
-            "--no-proxy-server"
+            "--no-proxy-server",
+            // Crash fix (v0.12.14, mode "D"): when this app is sandboxed (Release build
+            // distributed via App Group) and we exec Chrome as a child, Chrome inherits
+            // our sandbox/responsible-process. Chrome's password manager + cookie
+            // encryption (OSCrypt) calls SecKeychain* on a blocking thread-pool worker
+            // to fetch its profile encryption key from the macOS Keychain. Inside our
+            // sandbox the keychain access for `com.google.Chrome` items returns an
+            // unexpected error and Chrome's IMMEDIATE_CRASH/CHECK macro fires
+            // (EXC_BREAKPOINT / SIGTRAP on ThreadPoolSingleThreadForegroundBlocking0).
+            // Chromium ships two flags specifically for this case:
+            //   --password-store=basic  → use an in-profile basic password store
+            //                             instead of macOS Keychain.
+            //   --use-mock-keychain     → skip OSCrypt's keychain handshake on macOS
+            //                             and use a derived fallback key instead.
+            // We pass both for both headless AND headed launches: headless dodged the
+            // crash by not initializing the password manager the same way, but the
+            // headed foreground spawn (introduced in 2103ad5 to fix the v0.12.10
+            // "identify is active but no window" bug) hit it on every launch under
+            // Release. Belt-and-suspenders is fine here — we never want Chrome to
+            // touch the system keychain from our app's user-data-dir anyway, since
+            // the data is silo'd to this widget app.
+            "--password-store=basic",
+            "--use-mock-keychain"
         ]
 
         if headless {
