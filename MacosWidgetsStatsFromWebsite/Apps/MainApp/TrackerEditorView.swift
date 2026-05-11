@@ -20,6 +20,8 @@ struct TrackerEditorView: View {
     @State private var accentColor: Color
     @State private var browserPresentation: IdentifyBrowserPresentation?
     @State private var capturedText: String
+    @State private var chromiumAvailable: Bool = ChromeBrowserProfile.shared.chromiumIsAvailable()
+    @State private var isShowingChromiumInstallSheet: Bool = false
 
     let mode: Mode
     let onSave: (Tracker) -> Void
@@ -77,6 +79,23 @@ struct TrackerEditorView: View {
 
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
+                        if !chromiumAvailable {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label("Chromium isn't installed yet.", systemImage: "exclamationmark.triangle")
+                                    .foregroundStyle(.orange)
+                                Text("Identify needs Chromium / Brave / Edge to open a real signed-in browser. Install upstream Chromium (~150 MB) into the app's private folder, or install one of those browsers from their official sites.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Button {
+                                    isShowingChromiumInstallSheet = true
+                                } label: {
+                                    Label("Install Chromium (~150 MB)", systemImage: "arrow.down.circle")
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                            .padding(.bottom, 4)
+                        }
+
                         HStack(spacing: 8) {
                             TextField("No element captured", text: readOnlySelectorBinding)
                                 .textFieldStyle(.roundedBorder)
@@ -88,7 +107,7 @@ struct TrackerEditorView: View {
                             } label: {
                                 Label(draft.selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Identify in Chrome" : "Re-identify in Chrome", systemImage: "viewfinder")
                             }
-                            .disabled(validatedURL == nil)
+                            .disabled(validatedURL == nil || !chromiumAvailable)
                         }
 
                         if !captureValidationMessage.isEmpty {
@@ -141,6 +160,17 @@ struct TrackerEditorView: View {
             ChromeElementCaptureView(url: presentation.url, renderMode: draft.renderMode) { pick in
                 applyCapturedElement(pick)
             }
+        }
+        .sheet(isPresented: $isShowingChromiumInstallSheet) {
+            ChromiumInstallSheet(onCompletion: {
+                chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
+            })
+        }
+        .onAppear {
+            chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChromeBrowserProfile.chromiumAvailabilityDidChangeNotification)) { _ in
+            chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
         }
     }
 

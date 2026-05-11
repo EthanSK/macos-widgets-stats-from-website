@@ -25,6 +25,8 @@ struct FirstLaunchWizardView: View {
     @State private var createdTracker: Tracker?
     @State private var createdWidgetConfiguration: WidgetConfiguration?
     @State private var errorMessage: String?
+    @State private var chromiumAvailable: Bool = ChromeBrowserProfile.shared.chromiumIsAvailable()
+    @State private var isShowingChromiumInstallSheet: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -46,6 +48,17 @@ struct FirstLaunchWizardView: View {
             ChromeElementCaptureView(url: presentation.url, renderMode: renderMode) { pick in
                 applyCapturedElement(pick)
             }
+        }
+        .sheet(isPresented: $isShowingChromiumInstallSheet) {
+            ChromiumInstallSheet(onCompletion: {
+                chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
+            })
+        }
+        .onAppear {
+            chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChromeBrowserProfile.chromiumAvailabilityDidChangeNotification)) { _ in
+            chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
         }
     }
 
@@ -139,12 +152,29 @@ struct FirstLaunchWizardView: View {
 
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
+                        if !chromiumAvailable {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label("Chromium isn't installed yet.", systemImage: "exclamationmark.triangle")
+                                    .foregroundStyle(.orange)
+                                Text("Identify needs Chromium / Brave / Edge. Install upstream Chromium into the app's private folder (~150 MB) or install one of those browsers from their official sites.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Button {
+                                    isShowingChromiumInstallSheet = true
+                                } label: {
+                                    Label("Install Chromium (~150 MB)", systemImage: "arrow.down.circle")
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                            .padding(.bottom, 4)
+                        }
+
                         Button {
                             openIdentifyBrowser()
                         } label: {
                             Label(capturedPick == nil ? "Open Chrome and Identify Element" : "Re-identify in Chrome", systemImage: "viewfinder")
                         }
-                        .disabled(selectedURL == nil)
+                        .disabled(selectedURL == nil || !chromiumAvailable)
 
                         if let capturedPick {
                             VStack(alignment: .leading, spacing: 6) {

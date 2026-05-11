@@ -1018,6 +1018,115 @@ final class ChromeBrowserProfile {
         return path.lowercased()
     }
 
+    // MARK: - Public availability + install API
+    //
+    // Surfaced for the tracker editor / sign-in prefs / first-launch wizard UI
+    // so the user can see at-a-glance whether a Chromium-family browser is
+    // already resolvable, and can pre-install the managed Chromium snapshot
+    // BEFORE clicking Identify (rather than blocking on an opaque 150 MB
+    // download on first identify click).
+
+    /// Posted (on the main queue) whenever Chromium-availability state may have
+    /// changed — currently emitted after a successful managed-download install
+    /// or when the install path failed cleanly. SwiftUI views observe this so
+    /// the parent UI refreshes even if the install sheet was dismissed early
+    /// while the download was still in flight.
+    static let chromiumAvailabilityDidChangeNotification = Notification.Name(
+        "com.ethansk.macos-widgets-stats-from-website.chromiumAvailabilityDidChange"
+    )
+
+    /// True iff `resolveBrowser()` would succeed without triggering a network
+    /// download — env override, bundled Chromium, system Chromium / Brave /
+    /// Edge, or a previously-installed managed Chromium download. Does NOT
+    /// have side effects.
+    ///
+    /// If `MACOS_WIDGETS_STATS_CHROME_PATH` is set but does not point at a
+    /// valid browser, this returns `false` to mirror `resolveBrowser()`'s
+    /// fail-shut behavior — otherwise the UI would advertise Chromium as
+    /// available while every launch errored out on the bad override.
+    func chromiumIsAvailable() -> Bool {
+        if let override = ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_CHROME_PATH"]?.nilIfEmpty {
+            return ResolvedBrowser(path: override) != nil
+        }
+
+        for url in bundledBrowserCandidates() where ResolvedBrowser(url: url) != nil {
+            return true
+        }
+
+        for url in systemBrowserCandidates() where ResolvedBrowser(url: url) != nil {
+            return true
+        }
+
+        if ResolvedBrowser(url: managedChromiumAppURL) != nil {
+            return true
+        }
+
+        return false
+    }
+
+    /// Trigger a managed Chromium snapshot download with progress + completion
+    /// callbacks. Idempotent — returns the existing managed Chromium.app URL
+    /// immediately if it's already installed.
+    ///
+    /// Both callbacks are dispatched on the main queue so SwiftUI consumers
+    /// can drive `@Published` / `@State` state directly. `progress` is called
+    /// with a fractional value in [0, 1] during the archive download (extract
+    /// + xattr-strip + move-into-place are reported as a single 1.0 tick).
+    func installChromium(
+        progress: @escaping (Double) -> Void,
+        completion: @escaping (Result<URL, Error>) -> Void
+    ) {
+        // Fast path — already installed.
+        if let existing = ResolvedBrowser(url: managedChromiumAppURL) {
+            DispatchQueue.main.async {
+                progress(1.0)
+                switch existing.kind {
+                case .appBundle(let url), .executable(let url):
+                    completion(.success(url))
+                }
+                self.postAvailabilityDidChange()
+            }
+            return
+        }
+
+        // Detach from the caller's view-model lifetime — completion callbacks
+        // are decoupled via the chromiumAvailabilityDidChangeNotification, so
+        // a "Hide" mid-download still flips the parent UI on success.
+        queue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let browser = try self.downloadChromium(progress: { fraction in
+                    DispatchQueue.main.async {
+                        progress(fraction)
+                    }
+                })
+                DispatchQueue.main.async {
+                    progress(1.0)
+                    switch browser.kind {
+                    case .appBundle(let url), .executable(let url):
+                        completion(.success(url))
+                    }
+                    self.postAvailabilityDidChange()
+                }
+            } catch {
+                ActivityLogger.log("browser", "manual Chromium install failed", metadata: [
+                    "error": error.localizedDescription
+                ])
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                    self.postAvailabilityDidChange()
+                }
+            }
+        }
+    }
+
+    private func postAvailabilityDidChange() {
+        NotificationCenter.default.post(
+            name: Self.chromiumAvailabilityDidChangeNotification,
+            object: self
+        )
+    }
+
     private func resolveBrowser() throws -> ResolvedBrowser {
         // Developer / power-user escape hatch. Lets us point at a custom Chromium
         // binary for local testing or for a hand-installed Chromium.app outside
@@ -1229,7 +1338,7 @@ final class ChromeBrowserProfile {
     /// + a second main-app instance from the prior-app-exit migration race).
     /// The `if let existing = ...` check runs both BEFORE the lock is acquired
     /// (fast path) and AFTER (race recovery, in case a peer just installed it).
-    private func downloadChromium() throws -> ResolvedBrowser {
+    private func downloadChromium(progress: ((Double) -> Void)? = nil) throws -> ResolvedBrowser {
         if let existing = ResolvedBrowser(url: managedChromiumAppURL) {
             return existing
         }
@@ -1261,7 +1370,7 @@ final class ChromeBrowserProfile {
             ])
 
             let archiveURL = temporaryRoot.appendingPathComponent("chromium.zip", isDirectory: false)
-            try downloadFile(from: downloadURL, to: archiveURL)
+            try downloadFile(from: downloadURL, to: archiveURL, progress: progress)
 
             let extractURL = temporaryRoot.appendingPathComponent("extract", isDirectory: true)
             try fileManager.createDirectory(at: extractURL, withIntermediateDirectories: true)
@@ -1426,35 +1535,41 @@ final class ChromeBrowserProfile {
         return try result.get()
     }
 
-    private func downloadFile(from url: URL, to destinationURL: URL) throws {
+    private func downloadFile(
+        from url: URL,
+        to destinationURL: URL,
+        progress: ((Double) -> Void)? = nil
+    ) throws {
         let timeout: TimeInterval = 1_800
-        let session = URLSession(configuration: chromiumDownloadSessionConfiguration(timeout: timeout))
-        defer { session.invalidateAndCancel() }
-
         let semaphore = DispatchSemaphore(value: 0)
         var result: Result<URL, Error>?
-        session.downloadTask(with: url) { temporaryURL, response, error in
-            if let error {
-                result = .failure(error)
-            } else if let httpResponse = response as? HTTPURLResponse,
-                      !(200..<300).contains(httpResponse.statusCode) {
-                result = .failure(ChromeBrowserProfileError.downloadFailed("HTTP \(httpResponse.statusCode) from \(url.host ?? url.absoluteString)."))
-            } else if let temporaryURL {
-                // Move out of the URLSession scratch dir before this closure
-                // returns — URLSession deletes the file once we resume.
-                let stable = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-                    .appendingPathComponent("macos-widgets-stats-download-\(UUID().uuidString)", isDirectory: false)
-                do {
-                    try FileManager.default.moveItem(at: temporaryURL, to: stable)
-                    result = .success(stable)
-                } catch {
-                    result = .failure(error)
+
+        // Use a delegate-backed session so we get incremental progress
+        // notifications (didWriteData) — the completion-handler form of
+        // downloadTask does NOT emit progress. The delegate owns no shared
+        // mutable state with the caller; it captures `semaphore` and `result`
+        // via a serial completion closure.
+        let delegateQueue = OperationQueue()
+        delegateQueue.maxConcurrentOperationCount = 1
+        let delegate = ChromiumDownloadDelegate(
+            sourceURL: url,
+            progress: progress,
+            completion: { taskResult in
+                if result == nil {
+                    result = taskResult
+                    semaphore.signal()
                 }
-            } else {
-                result = .failure(ChromeBrowserProfileError.downloadFailed("No file returned from \(url.absoluteString)."))
             }
-            semaphore.signal()
-        }.resume()
+        )
+
+        let session = URLSession(
+            configuration: chromiumDownloadSessionConfiguration(timeout: timeout),
+            delegate: delegate,
+            delegateQueue: delegateQueue
+        )
+        defer { session.invalidateAndCancel() }
+
+        session.downloadTask(with: url).resume()
 
         guard semaphore.wait(timeout: .now() + timeout) == .success, let result else {
             throw ChromeBrowserProfileError.downloadFailed("Timed out downloading \(url.absoluteString).")
@@ -1693,5 +1808,90 @@ private extension FileHandle {
 private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
+    }
+}
+
+/// URLSession download delegate that emits fractional progress for the
+/// managed Chromium snapshot install. Used by `ChromeBrowserProfile`'s
+/// `downloadFile(from:to:progress:)`. Keeps the temporary file alive past
+/// the URLSession scratch-dir auto-delete by moving it to NSTemporaryDirectory
+/// before the delegate returns.
+private final class ChromiumDownloadDelegate: NSObject, URLSessionDownloadDelegate {
+    private let sourceURL: URL
+    private let progress: ((Double) -> Void)?
+    private let completion: (Result<URL, Error>) -> Void
+    private var didComplete = false
+
+    init(
+        sourceURL: URL,
+        progress: ((Double) -> Void)?,
+        completion: @escaping (Result<URL, Error>) -> Void
+    ) {
+        self.sourceURL = sourceURL
+        self.progress = progress
+        self.completion = completion
+        super.init()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard let progress, totalBytesExpectedToWrite > 0 else {
+            return
+        }
+        let fraction = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+        progress(max(0, min(0.99, fraction)))
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        // Move out of the URLSession scratch dir synchronously — URLSession
+        // deletes `location` as soon as this delegate method returns.
+        if let httpResponse = downloadTask.response as? HTTPURLResponse,
+           !(200..<300).contains(httpResponse.statusCode) {
+            finish(.failure(ChromeBrowserProfileError.downloadFailed(
+                "HTTP \(httpResponse.statusCode) from \(sourceURL.host ?? sourceURL.absoluteString)."
+            )))
+            return
+        }
+
+        let stable = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("macos-widgets-stats-download-\(UUID().uuidString)", isDirectory: false)
+        do {
+            try FileManager.default.moveItem(at: location, to: stable)
+            finish(.success(stable))
+        } catch {
+            finish(.failure(error))
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        if let error {
+            finish(.failure(error))
+        } else if !didComplete {
+            // Completed without an error and without didFinishDownloadingTo
+            // having signalled success — surface a clear error rather than
+            // hanging on the semaphore.
+            finish(.failure(ChromeBrowserProfileError.downloadFailed(
+                "No file returned from \(sourceURL.absoluteString)."
+            )))
+        }
+    }
+
+    private func finish(_ result: Result<URL, Error>) {
+        guard !didComplete else { return }
+        didComplete = true
+        completion(result)
     }
 }

@@ -12,6 +12,8 @@ struct SignInPrefsView: View {
     @State private var urlText = ""
     @State private var statusMessage: String?
     @State private var showsResetConfirmation = false
+    @State private var chromiumAvailable: Bool = ChromeBrowserProfile.shared.chromiumIsAvailable()
+    @State private var isShowingChromiumInstallSheet: Bool = false
 
     private var browserConfiguration: ChromeBrowserLaunchConfiguration {
         ChromeBrowserProfile.shared.configuration()
@@ -42,6 +44,32 @@ struct SignInPrefsView: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Text("Browser profile")
+            }
+
+            Section {
+                if chromiumAvailable {
+                    Label("Chromium-family browser detected.", systemImage: "checkmark.seal")
+                        .foregroundStyle(.green)
+                    Text("The app will use your installed Chromium / Brave / Edge, or the managed Chromium snapshot in Application Support.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("No Chromium browser detected.", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                        Text("Identify, sign-in, and scraping all need Chromium / Brave / Edge. Install upstream Chromium (~150 MB) into the app's private folder, or install one of those browsers from their official sites.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            isShowingChromiumInstallSheet = true
+                        } label: {
+                            Label("Install Chromium (~150 MB)", systemImage: "arrow.down.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+            } header: {
+                Text("Chromium")
             }
 
             Section {
@@ -94,6 +122,17 @@ struct SignInPrefsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This moves the app's Chrome/Chromium user-data folder to the Trash. Close any Chrome window opened by this app first if reset fails.")
+        }
+        .sheet(isPresented: $isShowingChromiumInstallSheet) {
+            ChromiumInstallSheet(onCompletion: {
+                chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
+            })
+        }
+        .onAppear {
+            chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChromeBrowserProfile.chromiumAvailabilityDidChangeNotification)) { _ in
+            chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
         }
     }
 
