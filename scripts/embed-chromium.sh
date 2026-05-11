@@ -13,10 +13,12 @@
 # outer codesign-and-notarize pass succeeds.
 #
 # Runs as a postBuildScripts phase (see project.yml: targets.MacosWidgetsStats…
-# .postBuildScripts), AFTER Xcode's built-in code-sign step. We then re-sign
-# the outer app over the now-embedded Chromium tree so Gatekeeper /
-# notarytool don't reject the bundle for "a sealed resource is missing or
-# invalid".
+# .postBuildScripts). Xcode's final CodeSign step normally runs after shell
+# phases, but incremental products may already carry a previous signature
+# when this script mutates Resources. We sign nested Chromium before the
+# final outer signature, and defensively re-sign the outer app when needed so
+# Gatekeeper / notarytool don't reject the bundle for "a sealed resource is
+# missing or invalid".
 #
 # Required Xcode env vars:
 #   PROJECT_DIR                — repo root (resolved by Xcode)
@@ -192,6 +194,14 @@ SIGNING_DISABLED=0
 if [ -z "$RESIGN_IDENTITY" ] || [ "${CODE_SIGNING_ALLOWED:-YES}" = "NO" ]; then
     SIGNING_DISABLED=1
 fi
+EXPECTED_TEAM_IDENTIFIER=""
+if [ "$RESIGN_IDENTITY" = "-" ]; then
+    EXPECTED_TEAM_IDENTIFIER="not set"
+elif [ -n "${DEVELOPMENT_TEAM:-}" ]; then
+    EXPECTED_TEAM_IDENTIFIER="$DEVELOPMENT_TEAM"
+elif [ -n "${TeamIdentifierPrefix:-}" ]; then
+    EXPECTED_TEAM_IDENTIFIER="${TeamIdentifierPrefix%.}"
+fi
 EMBED_LIST_FILE="$(/usr/bin/mktemp -t chromium-embed-paths-XXXXXX)"
 RESIGN_LIST_FILE="$(/usr/bin/mktemp -t chromium-resign-paths-XXXXXX)"
 
@@ -228,10 +238,10 @@ embed_one_arch() {
 
     if [ -n "$src_version" ] && [ "$src_version" = "$dst_version" ] \
         && [ -n "$src_revision" ] && [ "$src_revision" = "$dst_revision" ]; then
-        local outer_team=""
+        local expected_team="$EXPECTED_TEAM_IDENTIFIER"
         local existing_team=""
-        if [ -n "$RESIGN_IDENTITY" ]; then
-            outer_team="$(/usr/bin/codesign -dv "$PRODUCT_APP" 2>&1 | /usr/bin/grep -E '^TeamIdentifier=' | /usr/bin/cut -d= -f2- || true)"
+        if [ -z "$expected_team" ] && [ -n "$RESIGN_IDENTITY" ]; then
+            expected_team="$(/usr/bin/codesign -dv "$PRODUCT_APP" 2>&1 | /usr/bin/grep -E '^TeamIdentifier=' | /usr/bin/cut -d= -f2- || true)"
         fi
         existing_team="$(/usr/bin/codesign -dv "$dst_app" 2>&1 | /usr/bin/grep -E '^TeamIdentifier=' | /usr/bin/cut -d= -f2- || true)"
         if [ "$SIGNING_DISABLED" = "1" ]; then
@@ -240,14 +250,14 @@ embed_one_arch() {
             return 0
         fi
         if { [ -n "$existing_team" ] && [ "$existing_team" != "not set" ] \
-                && { [ -z "$outer_team" ] || [ "$existing_team" = "$outer_team" ]; }; } \
-            || { [ "$RESIGN_IDENTITY" = "-" ] && [ "$existing_team" = "not set" ]; }; then
+                && { [ -z "$expected_team" ] || [ "$existing_team" = "$expected_team" ]; }; } \
+            || { [ "$expected_team" = "not set" ] && [ "$existing_team" = "not set" ]; }; then
             echo "embed-chromium.sh: $dst_app already at $dst_version revision $dst_revision (team $existing_team) — skipping copy + resign."
             printf '%s\n' "$dst_app" >> "$EMBED_LIST_FILE"
             return 0
         fi
-        if [ -n "$existing_team" ] && [ "$existing_team" != "$outer_team" ]; then
-            echo "embed-chromium.sh: $dst_app team mismatch ('$existing_team' vs outer '$outer_team') — forcing re-sign."
+        if [ -n "$existing_team" ] && [ "$existing_team" != "$expected_team" ]; then
+            echo "embed-chromium.sh: $dst_app team mismatch ('$existing_team' vs expected '$expected_team') — forcing re-sign."
         fi
     fi
 
@@ -422,11 +432,11 @@ else
     done < "$RESIGN_LIST_FILE"
 fi
 
-# Re-sign the OUTER app over any Chromium-tree mutation. The script runs as a
-# postBuildScripts phase (after Xcode's built-in code-sign step), so adding,
-# replacing, or deleting browser resources after that point makes the outer
-# signature stale. Without this re-sign, Gatekeeper / notarytool reject the
-# outer bundle ("a sealed resource is missing or invalid").
+# Re-sign the OUTER app over any Chromium-tree mutation when the product is
+# already signed at this point in the build. Xcode's final CodeSign step
+# usually runs after this script and will seal the same Resources tree again;
+# this defensive pass covers incremental/manual invocations where the script
+# mutates an already signed bundle.
 if [ "$SIGNING_DISABLED" != "1" ] \
     && { [ "$outer_resign_needed" = "1" ] || [ -s "$RESIGN_LIST_FILE" ]; }; then
     ENTITLEMENTS_PATH=""
