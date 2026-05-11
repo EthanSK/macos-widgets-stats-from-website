@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import Darwin
 import Foundation
 
 struct ChromeBrowserLaunchConfiguration: Equatable {
@@ -1394,18 +1395,22 @@ final class ChromeBrowserProfile {
             let stagingURL = managedChromiumRootURL
                 .appendingPathComponent("Chromium.app.staging-\(UUID().uuidString)", isDirectory: true)
             try fileManager.copyItem(at: extractedAppURL, to: stagingURL)
-            // Strip quarantine xattr so Gatekeeper doesn't re-evaluate the
-            // downloaded bundle on every launch. Run synchronously — we must
-            // observe completion BEFORE the move-into-place; otherwise a
-            // concurrent resolver could see a managed Chromium.app with the
-            // quarantine xattr still attached and trigger a Gatekeeper prompt
-            // on launch.
-            try Self.runSync(
-                executable: URL(fileURLWithPath: "/usr/bin/xattr", isDirectory: false),
-                arguments: ["-dr", "com.apple.quarantine", stagingURL.path],
-                allowNonZeroExit: true,
-                logPrefix: "xattr quarantine strip"
-            )
+            // Strip quarantine xattr so Gatekeeper doesn't reject the binary
+            // with "operation not permitted" at exec time. Originally this
+            // shelled out to `/usr/bin/xattr -dr com.apple.quarantine ...`,
+            // but inside the App Sandbox the spawned `xattr` either silently
+            // no-ops or is denied — leaving `com.apple.quarantine` attached
+            // to every Mach-O in the bundle. Confirmed in the wild
+            // (2026-05-11, Ethan's MBP v0.13.x install) — the file was
+            // 0755 + Mach-O-valid but POSIX execve returned EACCES because
+            // of the lingering quarantine bit, and FileManager
+            // .isExecutableFile reflected that with `false`.
+            //
+            // Strip via the `removexattr` syscall directly. No subprocess,
+            // no sandbox concern, works inside the container. Recursive
+            // walk of the bundle covers the main exec, all helper .apps,
+            // dylibs, frameworks, and resources.
+            ChromeBrowserProfile.stripQuarantineRecursively(at: stagingURL)
 
             if fileManager.fileExists(atPath: managedChromiumAppURL.path) {
                 try fileManager.removeItem(at: managedChromiumAppURL)
@@ -1460,6 +1465,35 @@ final class ChromeBrowserProfile {
     }
 
     /// Run a child process synchronously and surface a clear error if it
+    /// Strip the `com.apple.quarantine` extended attribute from every file
+    /// inside `root` (and from `root` itself). Uses the `removexattr` C
+    /// syscall directly so we never spawn a subprocess — that's intentional:
+    /// inside macOS App Sandbox the equivalent `/usr/bin/xattr -dr ...` call
+    /// either silently no-ops or is denied, leaving the quarantine bit on
+    /// every Mach-O in the bundle, which makes Gatekeeper reject execve with
+    /// EACCES — and `FileManager.isExecutableFile` then reflects that as
+    /// `false` (the v0.13.x "executable is not executable" bug).
+    private static func stripQuarantineRecursively(at root: URL) {
+        // Strip on the root itself first.
+        _ = root.path.withCString { cPath in
+            removexattr(cPath, "com.apple.quarantine", XATTR_NOFOLLOW)
+        }
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: root,
+            includingPropertiesForKeys: nil,
+            options: [],  // do not skip hidden; quarantine can attach to .DS_Store / dotfiles
+            errorHandler: { _, _ in true }
+        ) else {
+            return
+        }
+        for case let fileURL as URL in enumerator {
+            _ = fileURL.path.withCString { cPath in
+                removexattr(cPath, "com.apple.quarantine", XATTR_NOFOLLOW)
+            }
+        }
+    }
+
     /// returns non-zero (or fails to launch). Centralizes the spawn pattern
     /// so we don't drop child handles on the floor — particularly around
     /// xattr / ditto invocations where the parent must observe completion
