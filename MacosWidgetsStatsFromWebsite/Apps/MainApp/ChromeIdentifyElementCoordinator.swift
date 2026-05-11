@@ -24,6 +24,8 @@ struct ElementCapturePreview: Identifiable {
 struct ChromeElementCaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var controller: ChromeElementCaptureController
+    @State private var chromiumAvailable: Bool = ChromeBrowserProfile.shared.chromiumIsAvailable()
+    @State private var isShowingChromiumInstallSheet: Bool = false
 
     private let onElementCaptured: (ElementPick) -> Void
 
@@ -81,6 +83,16 @@ struct ChromeElementCaptureView: View {
                     .textSelection(.enabled)
             }
 
+            if !chromiumAvailable {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Chromium isn't installed yet.", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                    Text("Identify needs Chromium / Brave / Edge to open a real signed-in browser. Install upstream Chromium (~150 MB) into the app's private folder, or install one of those browsers from their official sites.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Spacer(minLength: 8)
 
             HStack {
@@ -89,21 +101,46 @@ struct ChromeElementCaptureView: View {
                     dismiss()
                 }
                 Spacer()
-                Button(controller.hasStarted ? "Try Again" : "Open Chrome and Identify") {
-                    controller.start()
+                if !chromiumAvailable {
+                    Button {
+                        isShowingChromiumInstallSheet = true
+                    } label: {
+                        Label("Install Chromium (~150 MB)", systemImage: "arrow.down.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                } else {
+                    Button(controller.hasStarted ? "Try Again" : "Open Chrome and Identify") {
+                        controller.start()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(controller.isIdentifying)
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(controller.isIdentifying)
             }
         }
         .padding(22)
         .frame(width: 680)
         .frame(minHeight: 360)
         .onAppear {
-            controller.startIfNeeded()
+            chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
+            if chromiumAvailable {
+                controller.startIfNeeded()
+            }
         }
         .onDisappear {
             controller.cancelIfActive()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChromeBrowserProfile.chromiumAvailabilityDidChangeNotification)) { _ in
+            let nowAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
+            chromiumAvailable = nowAvailable
+            if nowAvailable && !controller.hasStarted {
+                controller.start()
+            }
+        }
+        .sheet(isPresented: $isShowingChromiumInstallSheet) {
+            ChromiumInstallSheet(onCompletion: {
+                chromiumAvailable = ChromeBrowserProfile.shared.chromiumIsAvailable()
+            })
         }
         .sheet(item: $controller.preview) { preview in
             ElementCapturePreviewSheet(
