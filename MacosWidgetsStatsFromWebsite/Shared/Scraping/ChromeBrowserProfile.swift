@@ -33,11 +33,12 @@ enum ChromeBrowserProfileError: LocalizedError {
     case cdpNotReachable(Int)
     case targetCreationFailed(String)
     case invalidCDPResponse
+    case downloadFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .browserNotFound:
-            return "Chrome for Testing is not bundled inside this build. Rebuild the app from source (scripts/embed-chrome-for-testing.sh runs automatically during build) and reinstall — the .app must contain Resources/Browsers/Google Chrome for Testing.app."
+            return "No Chromium-based browser was found. Install Chromium, Brave, or Microsoft Edge into /Applications, or set MACOS_WIDGETS_STATS_CHROME_PATH to a Chromium binary."
         case .launchFailed(let message):
             return "Could not launch the browser profile: \(message)"
         case .cdpNotReachable(let port):
@@ -46,6 +47,8 @@ enum ChromeBrowserProfileError: LocalizedError {
             return "Could not create a browser tab: \(message)"
         case .invalidCDPResponse:
             return "Chrome DevTools Protocol returned an unreadable response."
+        case .downloadFailed(let message):
+            return "Could not download Chromium: \(message)"
         }
     }
 }
@@ -764,8 +767,8 @@ final class ChromeBrowserProfile {
         let fileManager = FileManager.default
         if !fileManager.fileExists(atPath: executableURL.path) {
             throw ChromeBrowserProfileError.launchFailed(
-                "Bundled browser at \(appURL.path) has no executable file at Contents/MacOS/\(executableName). "
-                    + "The embed-chrome-for-testing.sh build phase appears not to have run, or the .app was stripped of its inner binary."
+                "Browser bundle at \(appURL.path) has no executable file at Contents/MacOS/\(executableName). "
+                    + "The .app appears corrupt or stripped of its inner binary."
             )
         }
 
@@ -780,8 +783,9 @@ final class ChromeBrowserProfile {
 
         guard fileManager.isExecutableFile(atPath: executableURL.path) else {
             throw ChromeBrowserProfileError.launchFailed(
-                "Bundled browser executable at \(executableURL.path) is not executable. "
-                    + "Re-bundle Chrome for Testing via scripts/embed-chrome-for-testing.sh."
+                "Browser executable at \(executableURL.path) is not executable. "
+                    + "Reinstall Chromium / Brave / Edge, or delete the managed download under "
+                    + "the app's Application Support so the next launch re-downloads it."
             )
         }
 
@@ -1015,66 +1019,100 @@ final class ChromeBrowserProfile {
     }
 
     private func resolveBrowser() throws -> ResolvedBrowser {
-        // Developer-only escape hatch. Lets us point at a custom Chromium binary
-        // for local testing. NOT user-facing — never documented in the UI.
+        // Developer / power-user escape hatch. Lets us point at a custom Chromium
+        // binary for local testing or for a hand-installed Chromium.app outside
+        // /Applications.
         if let override = ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_CHROME_PATH"]?.nilIfEmpty {
             if let browser = ResolvedBrowser(path: override) {
+                ActivityLogger.log("browser", "resolved browser via MACOS_WIDGETS_STATS_CHROME_PATH override", metadata: [
+                    "path": override
+                ])
                 return browser
             }
             throw ChromeBrowserProfileError.launchFailed("MACOS_WIDGETS_STATS_CHROME_PATH does not point at an app bundle or executable browser.")
         }
 
-        // Always use a dedicated Chrome for Testing instance — never the user's
-        // installed Google Chrome / Chromium / Brave / Edge / etc.
+        // Resolution order (re-introduced in 0.13.1):
         //
-        // Why not the user's installed browser:
-        //   - Chrome enforces a single-profile-per-user-data-dir lock, so if the
-        //     user's personal Chrome is running we cannot reliably get a separate
-        //     instance bound to our `--user-data-dir`. LaunchServices/`open -n`
-        //     workarounds are flaky across macOS+Chrome combinations.
-        //   - Even when isolation works, scraping inside the user's Chrome means
-        //     hijacking their browser session for the duration of a scrape.
-        //   - Profile persistence (the whole point of "Identify in Chrome": log
-        //     in once, the widget reuses the cookies later) is impossible to
-        //     guarantee against the user's personal profile.
+        //   1. Bundled Chromium dropped into Resources/Browsers/ inside the
+        //      shipped .app. Empty by default in 0.13.1+.
+        //   2. System Chromium-based browsers — Chromium.app, Brave Browser,
+        //      Microsoft Edge. These all support Google sign-in (CFT does not —
+        //      Google's risk engine blocks the HeadlessChrome User-Agent and
+        //      the navigator.webdriver flag CFT injects, which is why 0.13.0's
+        //      CFT-only bundle made the widget unusable on Google-auth pages).
+        //   3. Managed Chromium previously downloaded into Application Support.
         //
-        // CFT is bundled into Resources/Browsers at BUILD time by
-        // scripts/embed-chrome-for-testing.sh (called from the
-        // postBuildScripts phase in project.yml). Lazy-download was deleted
-        // in 0.13.0 because under Release/sandbox the downloaded bundle
-        // arrived without an executable bit, which produced the
-        // "browser bundle did not contain a launchable executable" error.
-        let candidates = bundledBrowserCandidates()
-        for url in candidates {
+        // We deliberately do NOT include `/Applications/Google Chrome.app`.
+        // Even with direct-exec + dedicated `--user-data-dir` (see d6ff449)
+        // the personal-Chrome hijack risk is too high in practice (LaunchServices
+        // routing, single-profile lock contention on the user's running session,
+        // and the surprise of the user's own browser window being the one that
+        // pops up). Chromium / Brave / Edge are different binaries with their
+        // own user-data-dirs, so a dedicated isolated profile is genuinely
+        // separate from the user's personal browser session.
+        //
+        //   4. Lazy-download of upstream Chromium (chromium-browser-snapshots).
+        //      Sandboxed Release builds may still hit the 0.12.13–0.12.15 era
+        //      "executable bit lost on extract" failure mode here — but unlike
+        //      0.13.0 we no longer mandate a bundled binary at build time, so
+        //      this is a last-ditch fallback rather than the only option. The
+        //      `MACOS_WIDGETS_STATS_DISABLE_CHROME_DOWNLOAD=1` env var disables
+        //      this path entirely (useful for sandbox-strict environments).
+
+        let bundled = bundledBrowserCandidates()
+        for url in bundled {
             if let browser = ResolvedBrowser(url: url) {
-                ActivityLogger.log("browser", "resolved bundled Chrome for Testing", metadata: [
+                ActivityLogger.log("browser", "resolved bundled Chromium-family browser", metadata: [
                     "path": url.path
                 ])
                 return browser
             }
         }
 
-        let attempted = candidates.map(\.path).joined(separator: ", ")
-        let isCLI = Bundle.main.bundlePath.hasSuffix(".app") == false
-        let actionable: String
-        if isCLI {
-            actionable = "The CLI build does not bundle Chrome for Testing — it expects to reuse the main "
-                + "app's bundled CFT. Install MacosWidgetsStatsFromWebsite.app to /Applications or "
-                + "~/Applications, OR set MACOS_WIDGETS_STATS_BROWSERS_DIR to a folder containing "
-                + "Google Chrome for Testing.app (or a mac-arm64/mac-x64 subdir), OR set "
-                + "MACOS_WIDGETS_STATS_CHROME_PATH to a Chrome/Chromium binary directly."
-        } else {
-            actionable = "Rebuild from source so the embed-chrome-for-testing build phase ships the nested CFT bundle."
+        for url in systemBrowserCandidates() {
+            if let browser = ResolvedBrowser(url: url) {
+                ActivityLogger.log("browser", "resolved system Chromium-family browser", metadata: [
+                    "path": url.path
+                ])
+                return browser
+            }
         }
-        throw ChromeBrowserProfileError.launchFailed(
-            "Bundled Chrome for Testing is missing from this build. Looked at: \(attempted). \(actionable)"
-        )
+
+        if let browser = ResolvedBrowser(url: managedChromiumAppURL) {
+            ActivityLogger.log("browser", "resolved managed Chromium download", metadata: [
+                "path": managedChromiumAppURL.path
+            ])
+            return browser
+        }
+
+        if autoDownloadChromiumEnabled {
+            do {
+                let browser = try downloadChromium()
+                ActivityLogger.log("browser", "downloaded and resolved Chromium", metadata: [
+                    "path": managedChromiumAppURL.path
+                ])
+                return browser
+            } catch let error as ChromeBrowserProfileError {
+                ActivityLogger.log("browser", "Chromium download failed", metadata: [
+                    "error": error.errorDescription ?? "unknown"
+                ])
+                throw error
+            } catch {
+                ActivityLogger.log("browser", "Chromium download failed", metadata: [
+                    "error": error.localizedDescription
+                ])
+                throw ChromeBrowserProfileError.downloadFailed(error.localizedDescription)
+            }
+        }
+
+        throw ChromeBrowserProfileError.browserNotFound
     }
 
     private func bundledBrowserCandidates() -> [URL] {
-        // For universal builds the embed phase writes per-arch subdirs so
-        // each architecture has a matching CFT slice. For single-arch builds
-        // it writes the flat path. We probe arch-specific first, then flat.
+        // Resources/Browsers/ is empty by default in 0.13.1+ (no postBuildScripts
+        // embed phase). Pure upstream Chromium is the only bundled browser this
+        // resolver will accept; CFT is intentionally not probed.
         #if arch(arm64)
         let archSubdir = "mac-arm64"
         #else
@@ -1082,32 +1120,21 @@ final class ChromeBrowserProfile {
         #endif
 
         let relativeCandidates = [
-            "Browsers/\(archSubdir)/Google Chrome for Testing.app",
-            // Canonical flat path (single-arch builds, and legacy layout).
-            "Browsers/Google Chrome for Testing.app",
-            "Google Chrome for Testing.app",
-            // Override-friendly layouts: a dev who points
-            // MACOS_WIDGETS_STATS_BROWSERS_DIR at the vendor/ tree
-            // directly (or any folder that mirrors the fetch script's
-            // arch subdirs) should resolve without a Browsers/ prefix.
-            "\(archSubdir)/Google Chrome for Testing.app"
+            // Preferred: pure upstream Chromium (Google sign-in compatible).
+            "Browsers/\(archSubdir)/Chromium.app",
+            "Browsers/Chromium.app",
+            "Chromium.app",
+            "\(archSubdir)/Chromium.app"
         ]
 
         var roots: [URL] = []
 
-        // 1) The current binary's bundled Resources directory. This is the
-        //    only path used by the main app target — and it's nil for the
-        //    CLI tool, which has no .app wrapper.
         if let bundleResources = Bundle.main.resourceURL {
             roots.append(bundleResources)
         }
 
-        // 2) Sibling-installed main app Resources. When the CLI runs from
-        //    /usr/local/bin (or a Homebrew-style location) the Bundle.main
-        //    above gives us no Resources to scan, so we also probe a small
-        //    set of well-known installation paths for the main app and
-        //    reuse its bundled CFT. Order matters: prefer the user's local
-        //    install over the system-wide one if both exist.
+        // Sibling-installed main app Resources — lets the CLI build inherit
+        // whatever the main app has bundled.
         let mainAppName = "MacosWidgetsStatsFromWebsite.app"
         let mainAppLocations: [URL] = [
             URL(fileURLWithPath: NSHomeDirectory())
@@ -1125,9 +1152,6 @@ final class ChromeBrowserProfile {
             }
         }
 
-        // 3) An explicit override directory for advanced/dev setups: point
-        //    MACOS_WIDGETS_STATS_BROWSERS_DIR at a folder that contains
-        //    `Google Chrome for Testing.app` (or `mac-arm64/...`).
         if let override = ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_BROWSERS_DIR"]?.nilIfEmpty {
             roots.append(URL(fileURLWithPath: override, isDirectory: true))
         }
@@ -1139,6 +1163,363 @@ final class ChromeBrowserProfile {
             }
         }
         return urls
+    }
+
+    private func systemBrowserCandidates() -> [URL] {
+        // Chromium-based browsers in /Applications that support Google sign-in
+        // and use their own user-data-dirs (so our `--user-data-dir=<app-group>`
+        // is isolated from the user's personal session).
+        //
+        // CRITICAL: Google Chrome is intentionally excluded. Direct-exec +
+        // dedicated user-data-dir does technically isolate, but in practice
+        // the personal-Chrome session leaks in (LaunchServices routing, profile
+        // lock contention, the visible window being the user's own browser).
+        // Use Chromium / Brave / Edge instead — they live in separate bundles
+        // and the dedicated profile is genuinely separate.
+        [
+            URL(fileURLWithPath: "/Applications/Chromium.app", isDirectory: true),
+            URL(fileURLWithPath: "/Applications/Brave Browser.app", isDirectory: true),
+            URL(fileURLWithPath: "/Applications/Microsoft Edge.app", isDirectory: true),
+            URL(fileURLWithPath: NSHomeDirectory() + "/Applications/Chromium.app", isDirectory: true),
+            URL(fileURLWithPath: NSHomeDirectory() + "/Applications/Brave Browser.app", isDirectory: true),
+            URL(fileURLWithPath: NSHomeDirectory() + "/Applications/Microsoft Edge.app", isDirectory: true),
+            URL(fileURLWithPath: "/opt/homebrew/bin/chromium", isDirectory: false),
+            URL(fileURLWithPath: "/usr/local/bin/chromium", isDirectory: false),
+            URL(fileURLWithPath: "/usr/bin/chromium", isDirectory: false)
+        ]
+    }
+
+    private var autoDownloadChromiumEnabled: Bool {
+        let value = ProcessInfo.processInfo.environment["MACOS_WIDGETS_STATS_DISABLE_CHROME_DOWNLOAD"]?.lowercased()
+        return value != "1" && value != "true" && value != "yes"
+    }
+
+    private var chromiumPlatform: String {
+        #if arch(arm64)
+        return "Mac_Arm"
+        #else
+        return "Mac"
+        #endif
+    }
+
+    private var managedChromiumRootURL: URL {
+        AppGroupPaths.canonicalApplicationSupportURL()
+            .appendingPathComponent("Browser", isDirectory: true)
+            .appendingPathComponent("Chromium", isDirectory: true)
+            .appendingPathComponent(chromiumPlatform, isDirectory: true)
+    }
+
+    private var managedChromiumAppURL: URL {
+        managedChromiumRootURL.appendingPathComponent("Chromium.app", isDirectory: true)
+    }
+
+    /// Download the latest upstream Chromium snapshot (Mac_Arm or Mac) from
+    /// Google's chromium-browser-snapshots bucket into the managed Application
+    /// Support directory. Returns a `ResolvedBrowser` pointing at the extracted
+    /// `Chromium.app` on success.
+    ///
+    /// Why upstream Chromium and not CFT: CFT injects automation markers
+    /// (HeadlessChrome User-Agent fragment, navigator.webdriver) that Google's
+    /// risk engine blocks at sign-in. Upstream Chromium does not, so a real
+    /// human can complete Google OAuth in the identify window and the widget
+    /// can scrape on the resulting cookie jar.
+    ///
+    /// Concurrency: an `flock`-based lockfile inside managedChromiumRootURL
+    /// serializes downloads across cooperating processes (main app + CLI tool
+    /// + a second main-app instance from the prior-app-exit migration race).
+    /// The `if let existing = ...` check runs both BEFORE the lock is acquired
+    /// (fast path) and AFTER (race recovery, in case a peer just installed it).
+    private func downloadChromium() throws -> ResolvedBrowser {
+        if let existing = ResolvedBrowser(url: managedChromiumAppURL) {
+            return existing
+        }
+
+        try fileManager.createDirectory(at: managedChromiumRootURL, withIntermediateDirectories: true)
+        let lockURL = managedChromiumRootURL.appendingPathComponent(".download.lock", isDirectory: false)
+        return try Self.withCrossProcessFileLock(at: lockURL) {
+            // Race recovery: a peer may have completed the install while we
+            // were waiting on the lock.
+            if let existing = ResolvedBrowser(url: managedChromiumAppURL) {
+                return existing
+            }
+
+            let temporaryRoot = fileManager.temporaryDirectory
+                .appendingPathComponent("MacosWidgetsStatsChromium-\(UUID().uuidString)", isDirectory: true)
+            try fileManager.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+            defer { try? fileManager.removeItem(at: temporaryRoot) }
+
+            let revision = try latestChromiumRevision()
+            let downloadURLString = "https://commondatastorage.googleapis.com/chromium-browser-snapshots/\(chromiumPlatform)/\(revision)/chrome-mac.zip"
+            guard let downloadURL = URL(string: downloadURLString) else {
+                throw ChromeBrowserProfileError.downloadFailed("Could not build Chromium snapshot download URL.")
+            }
+
+            ActivityLogger.log("browser", "downloading upstream Chromium", metadata: [
+                "platform": chromiumPlatform,
+                "revision": revision,
+                "url": downloadURLString
+            ])
+
+            let archiveURL = temporaryRoot.appendingPathComponent("chromium.zip", isDirectory: false)
+            try downloadFile(from: downloadURL, to: archiveURL)
+
+            let extractURL = temporaryRoot.appendingPathComponent("extract", isDirectory: true)
+            try fileManager.createDirectory(at: extractURL, withIntermediateDirectories: true)
+            try extractZip(at: archiveURL, to: extractURL)
+
+            guard let extractedAppURL = findExtractedChromiumApp(in: extractURL) else {
+                throw ChromeBrowserProfileError.downloadFailed("Chromium archive did not contain Chromium.app.")
+            }
+
+            // Restore the +x bit on the inner executable in case ditto extract
+            // stripped it (the 0.12.13–0.12.15 failure mode that motivated the
+            // CFT-bundle in 0.13.0). We re-set it before the move-into-place so
+            // ResolvedBrowser's `isExecutableFile` check passes immediately.
+            if let executable = ChromeBrowserProfile.executableURLIfPresent(forAppBundle: extractedAppURL) {
+                _ = try? fileManager.setAttributes(
+                    [.posixPermissions: NSNumber(value: 0o755)],
+                    ofItemAtPath: executable.path
+                )
+            }
+
+            let stagingURL = managedChromiumRootURL
+                .appendingPathComponent("Chromium.app.staging-\(UUID().uuidString)", isDirectory: true)
+            try fileManager.copyItem(at: extractedAppURL, to: stagingURL)
+            // Strip quarantine xattr so Gatekeeper doesn't re-evaluate the
+            // downloaded bundle on every launch. Run synchronously — we must
+            // observe completion BEFORE the move-into-place; otherwise a
+            // concurrent resolver could see a managed Chromium.app with the
+            // quarantine xattr still attached and trigger a Gatekeeper prompt
+            // on launch.
+            try Self.runSync(
+                executable: URL(fileURLWithPath: "/usr/bin/xattr", isDirectory: false),
+                arguments: ["-dr", "com.apple.quarantine", stagingURL.path],
+                allowNonZeroExit: true,
+                logPrefix: "xattr quarantine strip"
+            )
+
+            if fileManager.fileExists(atPath: managedChromiumAppURL.path) {
+                try fileManager.removeItem(at: managedChromiumAppURL)
+            }
+            try fileManager.moveItem(at: stagingURL, to: managedChromiumAppURL)
+
+            guard let browser = ResolvedBrowser(url: managedChromiumAppURL) else {
+                throw ChromeBrowserProfileError.downloadFailed("Downloaded Chromium is not launchable (missing inner executable after install).")
+            }
+            return browser
+        }
+    }
+
+    /// Cross-process file lock around a critical section. Uses POSIX `flock`
+    /// via the C library so two cooperating processes (main app + CLI, or two
+    /// main app instances during the prior-instance-termination race) cannot
+    /// concurrently install Chromium and stomp each other's staging dirs.
+    ///
+    /// On lock-acquire failure or work-failure we always release the descriptor.
+    /// The lock file itself is left in place — cleaning it up would just
+    /// re-create the race window between unlock + delete.
+    private static func withCrossProcessFileLock<T>(
+        at lockURL: URL,
+        timeout: TimeInterval = 3_600,
+        body: () throws -> T
+    ) throws -> T {
+        let path = lockURL.path
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: nil, attributes: [.posixPermissions: NSNumber(value: 0o644)])
+        }
+
+        let fd = open(path, O_RDWR | O_CREAT, 0o644)
+        guard fd != -1 else {
+            throw ChromeBrowserProfileError.downloadFailed("Could not open Chromium download lock file at \(path) (errno \(errno)).")
+        }
+        defer { close(fd) }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            if errno != EWOULDBLOCK {
+                throw ChromeBrowserProfileError.downloadFailed("Could not acquire Chromium download lock (errno \(errno)).")
+            }
+            if Date() > deadline {
+                throw ChromeBrowserProfileError.downloadFailed("Timed out waiting for the Chromium download lock to be released by another process.")
+            }
+            // Brief sleep to avoid pegging a core spin-checking the lock.
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        defer { _ = flock(fd, LOCK_UN) }
+
+        return try body()
+    }
+
+    /// Run a child process synchronously and surface a clear error if it
+    /// returns non-zero (or fails to launch). Centralizes the spawn pattern
+    /// so we don't drop child handles on the floor — particularly around
+    /// xattr / ditto invocations where the parent must observe completion
+    /// before moving on to file operations that depend on the side-effect.
+    @discardableResult
+    private static func runSync(
+        executable: URL,
+        arguments: [String],
+        allowNonZeroExit: Bool = false,
+        logPrefix: String? = nil
+    ) throws -> Int32 {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            throw ChromeBrowserProfileError.downloadFailed("\(logPrefix ?? executable.lastPathComponent) failed to launch: \(error.localizedDescription)")
+        }
+        process.waitUntilExit()
+
+        let status = process.terminationStatus
+        if status != 0, !allowNonZeroExit {
+            throw ChromeBrowserProfileError.downloadFailed("\(logPrefix ?? executable.lastPathComponent) exited with status \(status).")
+        }
+        if status != 0, let logPrefix {
+            ActivityLogger.log("browser", "\(logPrefix) non-zero exit (continuing)", metadata: [
+                "status": "\(status)"
+            ])
+        }
+        return status
+    }
+
+    private func latestChromiumRevision() throws -> String {
+        let lastChangeURLString = "https://commondatastorage.googleapis.com/chromium-browser-snapshots/\(chromiumPlatform)/LAST_CHANGE"
+        guard let lastChangeURL = URL(string: lastChangeURLString) else {
+            throw ChromeBrowserProfileError.downloadFailed("Could not build Chromium LAST_CHANGE URL.")
+        }
+        let data = try downloadData(from: lastChangeURL, timeout: 30)
+        guard let revision = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !revision.isEmpty else {
+            throw ChromeBrowserProfileError.downloadFailed("Chromium LAST_CHANGE response was empty.")
+        }
+        return revision
+    }
+
+    private func downloadData(from url: URL, timeout: TimeInterval) throws -> Data {
+        let session = URLSession(configuration: chromiumDownloadSessionConfiguration(timeout: timeout))
+        defer { session.invalidateAndCancel() }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Result<Data, Error>?
+        session.dataTask(with: url) { data, response, error in
+            if let error {
+                result = .failure(error)
+            } else if let httpResponse = response as? HTTPURLResponse,
+                      !(200..<300).contains(httpResponse.statusCode) {
+                result = .failure(ChromeBrowserProfileError.downloadFailed("HTTP \(httpResponse.statusCode) from \(url.host ?? url.absoluteString)."))
+            } else if let data {
+                result = .success(data)
+            } else {
+                result = .failure(ChromeBrowserProfileError.downloadFailed("No data returned from \(url.absoluteString)."))
+            }
+            semaphore.signal()
+        }.resume()
+
+        guard semaphore.wait(timeout: .now() + timeout) == .success, let result else {
+            throw ChromeBrowserProfileError.downloadFailed("Timed out fetching \(url.absoluteString).")
+        }
+        return try result.get()
+    }
+
+    private func downloadFile(from url: URL, to destinationURL: URL) throws {
+        let timeout: TimeInterval = 1_800
+        let session = URLSession(configuration: chromiumDownloadSessionConfiguration(timeout: timeout))
+        defer { session.invalidateAndCancel() }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Result<URL, Error>?
+        session.downloadTask(with: url) { temporaryURL, response, error in
+            if let error {
+                result = .failure(error)
+            } else if let httpResponse = response as? HTTPURLResponse,
+                      !(200..<300).contains(httpResponse.statusCode) {
+                result = .failure(ChromeBrowserProfileError.downloadFailed("HTTP \(httpResponse.statusCode) from \(url.host ?? url.absoluteString)."))
+            } else if let temporaryURL {
+                // Move out of the URLSession scratch dir before this closure
+                // returns — URLSession deletes the file once we resume.
+                let stable = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                    .appendingPathComponent("macos-widgets-stats-download-\(UUID().uuidString)", isDirectory: false)
+                do {
+                    try FileManager.default.moveItem(at: temporaryURL, to: stable)
+                    result = .success(stable)
+                } catch {
+                    result = .failure(error)
+                }
+            } else {
+                result = .failure(ChromeBrowserProfileError.downloadFailed("No file returned from \(url.absoluteString)."))
+            }
+            semaphore.signal()
+        }.resume()
+
+        guard semaphore.wait(timeout: .now() + timeout) == .success, let result else {
+            throw ChromeBrowserProfileError.downloadFailed("Timed out downloading \(url.absoluteString).")
+        }
+
+        let temporaryURL = try result.get()
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.moveItem(at: temporaryURL, to: destinationURL)
+    }
+
+    private func chromiumDownloadSessionConfiguration(timeout: TimeInterval) -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
+        return configuration
+    }
+
+    private func extractZip(at archiveURL: URL, to destinationURL: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto", isDirectory: false)
+        process.arguments = ["-x", "-k", archiveURL.path, destinationURL.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw ChromeBrowserProfileError.downloadFailed("ditto exited with status \(process.terminationStatus) extracting Chromium archive.")
+        }
+    }
+
+    private func findExtractedChromiumApp(in rootURL: URL) -> URL? {
+        guard let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        for case let url as URL in enumerator {
+            if url.lastPathComponent == "Chromium.app",
+               let browser = ResolvedBrowser(url: url),
+               case .appBundle = browser.kind {
+                return url
+            }
+        }
+        return nil
+    }
+
+    /// Like `executableURL(forAppBundle:)` but returns nil instead of throwing
+    /// when the inner binary is missing. Used during the post-download
+    /// permission-restoration pass, where a missing executable just means the
+    /// outer download path will throw a clearer error a moment later.
+    private static func executableURLIfPresent(forAppBundle appURL: URL) -> URL? {
+        let bundle = Bundle(url: appURL)
+        let executableName = bundle?.object(forInfoDictionaryKey: "CFBundleExecutable") as? String
+            ?? appURL.deletingPathExtension().lastPathComponent
+        let executableURL = appURL
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("MacOS", isDirectory: true)
+            .appendingPathComponent(executableName, isDirectory: false)
+        return FileManager.default.fileExists(atPath: executableURL.path) ? executableURL : nil
     }
 
     /// Bring ONLY the dedicated Chrome instance for `configuration` to the front —
@@ -1268,6 +1649,13 @@ private struct ResolvedBrowser {
         }
 
         if isDirectory.boolValue, url.pathExtension.lowercased() == "app" {
+            // Validate that the .app actually has a launchable inner executable
+            // BEFORE accepting it. Otherwise a corrupt managed Chromium.app or
+            // a half-installed /Applications/Chromium.app would win resolution
+            // and prevent fallback to the next candidate (or to lazy-download).
+            guard ResolvedBrowser.hasLaunchableExecutable(forAppBundle: url) else {
+                return nil
+            }
             kind = .appBundle(url)
             return
         }
@@ -1277,6 +1665,22 @@ private struct ResolvedBrowser {
         }
 
         kind = .executable(url)
+    }
+
+    /// True iff the `.app` at `appURL` has a readable Info.plist (or a sensible
+    /// CFBundleExecutable fallback) AND the inner Contents/MacOS/<exec> file
+    /// exists. Does not require the +x bit (we re-set that lazily on launch via
+    /// `executableURL(forAppBundle:)`), but does require an actual binary so a
+    /// .app bundle that contains only a Resources/ subdir cannot pass.
+    private static func hasLaunchableExecutable(forAppBundle appURL: URL) -> Bool {
+        let bundle = Bundle(url: appURL)
+        let executableName = (bundle?.object(forInfoDictionaryKey: "CFBundleExecutable") as? String)
+            ?? appURL.deletingPathExtension().lastPathComponent
+        let executableURL = appURL
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("MacOS", isDirectory: true)
+            .appendingPathComponent(executableName, isDirectory: false)
+        return FileManager.default.fileExists(atPath: executableURL.path)
     }
 }
 
