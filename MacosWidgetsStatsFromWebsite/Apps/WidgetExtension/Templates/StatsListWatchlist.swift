@@ -45,6 +45,7 @@ struct StatsListWatchlistTemplate: View {
             Spacer(minLength: 0)
         }
         .padding(14)
+        .widgetRefreshOverlay(trackerIDs: items.prefix(6).map(\.tracker.id))
         .accessibilityElement(children: .contain)
     }
 }

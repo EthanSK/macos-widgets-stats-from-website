@@ -28,8 +28,29 @@ final class BackgroundScheduler: ObservableObject {
     private var activeTrackerIDs: Set<UUID> = []
     private var notifiedBrokenTrackerIDs: Set<UUID> = []
 
+    // MARK: - Widget refresh handoff
+    //
+    // The widget extension (separate sandboxed process) writes pending
+    // scrape requests as JSON files under <AppGroup>/pending-scrape-requests/.
+    // We watch that directory with a DispatchSourceFileSystemObject so the
+    // user gets near-instant feedback after tapping the refresh button in
+    // the widget UI. See PendingScrapeRequestStore for the file format.
+    private var pendingRequestWatcher: DispatchSourceFileSystemObject?
+    private var pendingRequestWatcherFD: Int32 = -1
+    private let pendingRequestWatcherQueue = DispatchQueue(
+        label: "com.ethansk.macos-widgets-stats-from-website.pending-scrape-watcher"
+    )
+
     init(store: AppGroupStore) {
         self.store = store
+        startPendingRequestWatcher()
+        // Drain anything written while the app was off (the watcher only
+        // fires for changes that happen *after* it's installed).
+        drainPendingScrapeRequests()
+    }
+
+    deinit {
+        stopPendingRequestWatcher()
     }
 
     func sync() {
@@ -162,5 +183,85 @@ final class BackgroundScheduler: ObservableObject {
 
         notifiedBrokenTrackerIDs.insert(tracker.id)
         TrackerAttentionNotifier.shared.notifyBrokenTracker(tracker, failureCount: failureCount)
+    }
+
+    // MARK: - Pending-request watcher
+
+    /// Public entry point so app-lifecycle code (`scenePhase` changes, URL
+    /// scheme deep links from `macos-widgets-stats-from-website://refresh`)
+    /// can force a drain without waiting on the FS watcher. Idempotent.
+    func drainPendingScrapeRequests() {
+        let pending = PendingScrapeRequestStore.loadPending()
+        guard !pending.isEmpty else {
+            return
+        }
+
+        // Dedupe: if the user tap-spammed the widget, multiple files exist
+        // for the same trackerID. One scrape is sufficient — collapse and
+        // clear all matching files.
+        var seenTrackerIDs: Set<UUID> = []
+        for (fileURL, request) in pending {
+            defer { PendingScrapeRequestStore.clearPending(fileURL: fileURL) }
+            guard let trackerID = UUID(uuidString: request.trackerID),
+                  !seenTrackerIDs.contains(trackerID) else {
+                continue
+            }
+            seenTrackerIDs.insert(trackerID)
+
+            ActivityLogger.log("pending-scrape", "draining", metadata: [
+                "trackerID": trackerID.uuidString
+            ])
+            DispatchQueue.main.async { [weak self] in
+                self?.triggerScrapeNow(trackerID: trackerID)
+            }
+        }
+    }
+
+    /// Installs a DispatchSourceFileSystemObject on the pending-request
+    /// directory so widget-side writes are picked up within milliseconds.
+    /// We watch the *directory* (not individual files) because requests
+    /// are short-lived and the file set churns frequently. Restarted
+    /// transparently if the FD ever closes.
+    private func startPendingRequestWatcher() {
+        guard let directory = PendingScrapeRequestStore.ensureDirectoryExists() else {
+            return
+        }
+
+        let fd = open(directory.path, O_EVTONLY)
+        guard fd >= 0 else {
+            ActivityLogger.log("pending-scrape", "watcher open failed", metadata: [
+                "path": directory.path,
+                "errno": "\(errno)"
+            ])
+            return
+        }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .delete, .rename],
+            queue: pendingRequestWatcherQueue
+        )
+        source.setEventHandler { [weak self] in
+            // .write fires on directory mutations (new files, removals).
+            // We don't differentiate event types — any change is a signal
+            // to re-enumerate the directory.
+            self?.drainPendingScrapeRequests()
+        }
+        source.setCancelHandler {
+            close(fd)
+        }
+        source.resume()
+
+        pendingRequestWatcher = source
+        pendingRequestWatcherFD = fd
+        ActivityLogger.log("pending-scrape", "watcher started", metadata: [
+            "path": directory.path
+        ])
+    }
+
+    private func stopPendingRequestWatcher() {
+        pendingRequestWatcher?.cancel()
+        pendingRequestWatcher = nil
+        pendingRequestWatcherFD = -1
     }
 }

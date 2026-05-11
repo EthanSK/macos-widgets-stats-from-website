@@ -39,6 +39,7 @@ struct SingleBigNumberTemplate: View {
             .foregroundStyle(.secondary)
         }
         .padding(14)
+        .widgetRefreshOverlay(trackerID: item?.tracker.id)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("\(item?.title ?? "Tracker"), \(item?.value ?? "no value"), updated \(item?.updatedText ?? "never")"))
     }

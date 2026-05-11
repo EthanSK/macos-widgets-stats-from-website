@@ -31,6 +31,7 @@ struct HeadlineSparklineTemplate: View {
                 .frame(width: 130, height: 90)
         }
         .padding(14)
+        .widgetRefreshOverlay(trackerID: item?.tracker.id)
         .accessibilityElement(children: .combine)
     }
 }

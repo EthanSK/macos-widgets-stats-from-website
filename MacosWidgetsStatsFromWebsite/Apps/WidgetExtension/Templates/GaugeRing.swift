@@ -31,6 +31,7 @@ struct GaugeRingTemplate: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(12)
+        .widgetRefreshOverlay(trackerID: item?.tracker.id)
         .accessibilityElement(children: .combine)
     }
 

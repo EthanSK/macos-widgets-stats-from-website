@@ -16,6 +16,7 @@ struct LiveSnapshotHeroTemplate: View {
                 SnapshotOverlay(item: item)
                     .padding(10)
             }
+            .widgetRefreshOverlay(trackerID: item?.tracker.id)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text("\(item?.title ?? "Snapshot tracker"), updated \(item?.updatedText ?? "never")"))
     }

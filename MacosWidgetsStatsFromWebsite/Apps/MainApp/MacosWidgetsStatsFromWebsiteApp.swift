@@ -59,6 +59,12 @@ struct MacosWidgetsStatsFromWebsiteApp: App {
                 .onAppear {
                     ActivityLogger.log("app", "main window appeared")
                     backgroundScheduler.sync()
+                    // Drain anything the widget queued while the app was
+                    // not running — the file watcher inside the scheduler
+                    // only fires for changes that happen *after* it's
+                    // installed, so the cold-launch backlog needs an
+                    // explicit drain. Idempotent; safe to call repeatedly.
+                    backgroundScheduler.drainPendingScrapeRequests()
                     DockBadgeUpdater.update()
                     reloadWidgets()
                 }
@@ -74,6 +80,13 @@ struct MacosWidgetsStatsFromWebsiteApp: App {
                     backgroundScheduler.sync()
                     DockBadgeUpdater.update()
                     reloadWidgets()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: AppNavigationEvents.drainPendingScrapeRequestsNotification)) { _ in
+                    // Triggered by macos-widgets-stats-from-website://refresh
+                    // deep links from the widget extension when the main app
+                    // wasn't running. The watcher inside the scheduler also
+                    // handles this case while the app IS running.
+                    backgroundScheduler.drainPendingScrapeRequests()
                 }
                 .sheet(isPresented: $showsFirstLaunchFlow) {
                     FirstLaunchWizardView(isPresented: $showsFirstLaunchFlow)

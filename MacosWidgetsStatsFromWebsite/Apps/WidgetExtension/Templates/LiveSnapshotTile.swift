@@ -17,6 +17,7 @@ struct LiveSnapshotTileTemplate: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .padding(6)
+            .widgetRefreshOverlay(trackerID: item?.tracker.id)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text("\(item?.title ?? "Snapshot tracker"), updated \(item?.updatedText ?? "never")"))
     }

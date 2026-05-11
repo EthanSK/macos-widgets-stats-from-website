@@ -136,6 +136,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func openDeepLink(_ url: URL) {
+        // `macos-widgets-stats-from-website://refresh` is the widget
+        // fallback path: the widget extension's RefreshTrackerIntent
+        // writes a pending-request file AND (if the main app was off)
+        // nudges via this URL so LaunchServices brings the app forward.
+        // The actual scrape is dispatched by BackgroundScheduler when it
+        // drains the pending-request directory on foreground / launch, so
+        // we don't need to do anything extra here other than make sure
+        // the app is foregrounded.
+        if url.host == "refresh" {
+            NSApp.activate(ignoringOtherApps: true)
+            NotificationCenter.default.post(
+                name: AppNavigationEvents.drainPendingScrapeRequestsNotification,
+                object: nil
+            )
+            return
+        }
+
         guard url.host == "tracker",
               let trackerIDString = url.pathComponents.dropFirst().first,
               let trackerID = UUID(uuidString: trackerIDString) else {

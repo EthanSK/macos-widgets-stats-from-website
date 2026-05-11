@@ -40,6 +40,7 @@ struct Dashboard3UpTemplate: View {
             }
         }
         .padding(.vertical, 14)
+        .widgetRefreshOverlay(trackerIDs: items.prefix(3).map(\.tracker.id))
         .accessibilityElement(children: .contain)
     }
 }

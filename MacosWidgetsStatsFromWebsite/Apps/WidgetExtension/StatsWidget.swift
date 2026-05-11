@@ -578,6 +578,64 @@ enum NumberAnimation {
     }
 }
 
+/// Small refresh button surfaced inside each widget template. Tapping it
+/// invokes `RefreshTrackerIntent`, which writes one pending-scrape
+/// request file per tracker the main app's BackgroundScheduler picks up
+/// via a file watcher. Designed to be unobtrusive — semi-transparent
+/// foreground, hierarchical rendering, ~14pt icon — so the scraped
+/// number stays the focus.
+///
+/// `trackerIDs` is a list because multi-tracker templates
+/// (Dashboard3Up, StatsListWatchlist, MegaDashboardGrid, DualStatCompare)
+/// want one button to refresh every visible tracker. Empty array →
+/// EmptyView so placeholder / gallery previews don't render a stray
+/// button.
+@available(macOSApplicationExtension 14.0, *)
+struct WidgetRefreshButton: View {
+    let trackerIDs: [UUID]
+
+    var body: some View {
+        if !trackerIDs.isEmpty {
+            Button(intent: RefreshTrackerIntent(trackerIDs: trackerIDs)) {
+                Image(systemName: "arrow.clockwise.circle.fill")
+                    .font(.system(size: 14, weight: .regular))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Refresh tracker now"))
+        } else {
+            EmptyView()
+        }
+    }
+}
+
+/// Convenience modifier so templates can opt into the refresh button
+/// with a single line. Anchored to bottom-trailing across the board so
+/// the affordance lives in a consistent place no matter which template
+/// is active and so it doesn't collide with the top-leading
+/// configuration-name chip or the top-trailing error badge.
+extension View {
+    @ViewBuilder
+    func widgetRefreshOverlay(trackerIDs: [UUID]) -> some View {
+        if #available(macOSApplicationExtension 14.0, *) {
+            self.overlay(alignment: .bottomTrailing) {
+                WidgetRefreshButton(trackerIDs: trackerIDs)
+                    .padding(6)
+            }
+        } else {
+            self
+        }
+    }
+
+    /// Single-tracker convenience overload used by all the
+    /// one-tracker-per-template flavours.
+    @ViewBuilder
+    func widgetRefreshOverlay(trackerID: UUID?) -> some View {
+        widgetRefreshOverlay(trackerIDs: trackerID.map { [$0] } ?? [])
+    }
+}
+
 struct ErrorStateBadge: View {
     let item: WidgetTrackerItem
 

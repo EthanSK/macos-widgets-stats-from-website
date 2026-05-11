@@ -35,6 +35,7 @@ struct HeroPlusDetailTemplate: View {
             }
         }
         .padding(16)
+        .widgetRefreshOverlay(trackerID: item?.tracker.id)
         .accessibilityElement(children: .contain)
     }
 

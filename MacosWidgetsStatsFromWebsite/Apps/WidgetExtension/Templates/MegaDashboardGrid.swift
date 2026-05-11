@@ -47,6 +47,7 @@ struct MegaDashboardGridTemplate: View {
             }
         }
         .padding(12)
+        .widgetRefreshOverlay(trackerIDs: items.prefix(8).map(\.tracker.id))
         .accessibilityElement(children: .contain)
     }
 }

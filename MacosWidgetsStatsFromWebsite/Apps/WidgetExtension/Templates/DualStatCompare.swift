@@ -44,6 +44,7 @@ struct DualStatCompareTemplate: View {
             }
         }
         .padding(.vertical, 12)
+        .widgetRefreshOverlay(trackerIDs: items.prefix(2).map(\.tracker.id))
         .accessibilityElement(children: .contain)
     }
 }

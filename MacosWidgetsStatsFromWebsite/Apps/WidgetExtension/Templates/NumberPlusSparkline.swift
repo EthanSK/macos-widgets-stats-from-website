@@ -28,6 +28,7 @@ struct NumberPlusSparklineTemplate: View {
                 .foregroundStyle(.secondary)
         }
         .padding(14)
+        .widgetRefreshOverlay(trackerID: item?.tracker.id)
         .accessibilityElement(children: .combine)
     }
 }
