@@ -2,8 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- App Sandbox is disabled in Release.
+	     Reason: the app spawns a bundled Chromium child for CDP scraping +
+	     identify flows. Under App Sandbox the spawned Chromium inherits the
+	     parent's narrow sandbox profile, hits SIGABRT in its main thread
+	     during early init (codeSigningMonitor:2, abort() in Chromium Framework,
+	     no usable Chrome console output), and never binds its CDP port —
+	     observed deterministically in v0.14.x even with Hardened Runtime
+	     entitlements (allow-jit + disable-library-validation + allow-unsigned-
+	     executable-memory) set on BOTH the outer .app and the nested
+	     Chromium.app. The known cure is to not sandbox the outer app; this
+	     forfeits Mac App Store eligibility, which is already deferred per
+	     docs/app-store.md. Hardened Runtime remains on for notarization. -->
 	<key>com.apple.security.app-sandbox</key>
-	<true/>
+	<false/>
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>T34G959ZG8.group.com.ethansk.macos-widgets-stats-from-website</string>
