@@ -1,6 +1,59 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# build.sh — single-machine canonical build pipeline.
+#
+# What this script does, in order:
+#   1. Runs `xcodegen` to regenerate the Xcode project from project.yml.
+#   2. Builds the `MacosWidgetsStatsFromWebsite` GUI scheme (Debug config) into
+#      a stable derived-data path. The GUI scheme also embeds the widget
+#      extension + bundled Chromium via its post-build script. The resulting
+#      .app is the canonical end-user artifact.
+#   3. Builds the `MacosWidgetsStatsFromWebsiteCLI` scheme (Release config)
+#      into its own derived-data path. The CLI is a Mach-O tool whose
+#      `--mcp-stdio` entrypoint hosts the MCP server when launched as a
+#      subprocess by an external agent (Claude Code, OpenClaw, etc.). The CLI
+#      lives at `Contents/MacOS/macos-widgets-stats-from-website` inside the
+#      .app bundle alongside the GUI binary so the same bundle is the unit of
+#      install for both surfaces.
+#   4. Copies the CLI binary into `Contents/MacOS/` of the GUI .app bundle and
+#      re-signs both the CLI and the parent .app with entitlements consistent
+#      with the current build mode (Debug vs. DEV_RESIGN vs. profile-backed).
+#   5. Smoke-tests the embedded CLI by sending it an MCP `initialize` request
+#      over stdio and confirming a clean response + exit. Failure aborts the
+#      build so a broken-CLI bundle never lands in /Applications by accident.
+#   6. If `--install` is passed, ditto's the assembled .app into /Applications
+#      after terminating any prior copy. Default behaviour is NOT to install —
+#      explicit opt-in only.
+#
+# Environment + flag reference:
+#   - DEV_RESIGN=1 or --dev-resign
+#       Enables the chronod-resign workaround for the widget extension AND
+#       switches the CLI to a stripped entitlements file
+#       (MacosWidgetsStatsFromWebsiteCLI.dev.entitlements). The dev file
+#       removes `com.apple.security.application-groups` and
+#       `keychain-access-groups`, which are profile-gated and would otherwise
+#       trigger taskgated SIGKILL ("Invalid Signature") when the CLI is
+#       signed with a bare Apple Development cert without an embedded
+#       provisioning profile. Use this on personal/dev machines.
+#   - ALLOW_PROVISIONING_UPDATES=1
+#       Passes `-allowProvisioningUpdates` to xcodebuild so Xcode can fix up
+#       signing settings on first run.
+#   - DERIVED_DATA_PATH=<path>
+#       Override the default `build/manual-test-derived` location. Useful for
+#       parallel builds.
+#   - --install
+#       Ditto the assembled .app to `/Applications` after the build + smoke
+#       test pass. Does NOT trigger by default — Mini-CC and CI both want the
+#       install separated from the pipeline step.
+#
+# CI / Release builds DO NOT use this script. The GitHub Actions workflow
+# (`.github/workflows/release.yml`) invokes `xcodebuild archive` directly with
+# the real Developer ID cert and embedded provisioning profile, so the
+# DEV_RESIGN path never executes there.
+# ---------------------------------------------------------------------------
+
 # Use a stable derived-data path so the post-build verify/sign step can
 # locate the .app reliably and so the running binary path stays consistent
 # across rebuilds (also helps TCC keep its grants attached to one path).
@@ -16,12 +69,19 @@ DEV_RESIGN_FLAG=0
 if [[ "${DEV_RESIGN:-0}" == "1" ]]; then
   DEV_RESIGN_FLAG=1
 fi
+INSTALL_FLAG=0
 for arg in "$@"; do
-  if [[ "$arg" == "--dev-resign" ]]; then
-    DEV_RESIGN_FLAG=1
-  fi
+  case "$arg" in
+    --dev-resign)
+      DEV_RESIGN_FLAG=1
+      ;;
+    --install)
+      INSTALL_FLAG=1
+      ;;
+  esac
 done
 
+echo "=== STEP 1: xcodegen ==="
 xcodegen
 
 XCODEBUILD_SIGNING_FLAGS=()
@@ -29,6 +89,7 @@ if [[ "${ALLOW_PROVISIONING_UPDATES:-}" == "1" ]]; then
   XCODEBUILD_SIGNING_FLAGS+=("-allowProvisioningUpdates")
 fi
 
+echo "=== STEP 2: build GUI scheme (MacosWidgetsStatsFromWebsite, Debug) ==="
 # Build Debug with the project's normal automatic signing. This uses
 # Ethan's developer cert and produces a signed binary with the
 # Debug.entitlements file (app-sandbox=false) embedded — which is what
@@ -176,7 +237,13 @@ tccutil reset SystemPolicyAppData com.ethansk.macos-widgets-stats-from-website >
 # continue so the build still produces a usable artefact (just one chronod
 # might not register). DEV_RESIGN_FLAG is parsed at the top of the script.
 # ---------------------------------------------------------------------------
+# APP_DEV_AUTHORITY is reused below by the CLI assembly step (STEP 4) to keep
+# the CLI's signing identity consistent with the parent .app. Captured here
+# so a single security/codesign probe covers both code paths.
+APP_DEV_AUTHORITY=""
+
 if [[ "$DEV_RESIGN_FLAG" == "1" ]]; then
+  echo "=== STEP 3a: DEV_RESIGN chronod workaround on widget extension ==="
   echo "build.sh: DEV_RESIGN=1 — applying chronod-resign workaround on $WIDGET_PATH"
 
   # Locate the .xcent entitlements file emitted by xcodebuild for the appex.
@@ -247,3 +314,209 @@ if [[ "$DEV_RESIGN_FLAG" == "1" ]]; then
 
   set -o pipefail
 fi
+
+# ---------------------------------------------------------------------------
+# STEP 3: build the CLI scheme (MacosWidgetsStatsFromWebsiteCLI, Release).
+# ---------------------------------------------------------------------------
+# The CLI scheme produces a standalone Mach-O tool whose `--mcp-stdio`
+# entrypoint hosts the MCP server when an external agent (Claude Code,
+# OpenClaw) launches it as a stdio subprocess. We build Release so the binary
+# is optimized and Sparkle / external invocations get the same artefact as CI.
+# Build into a SEPARATE derived-data path so the CLI build doesn't clobber the
+# GUI build's intermediates.
+echo "=== STEP 3: build CLI scheme (MacosWidgetsStatsFromWebsiteCLI, Release) ==="
+CLI_DERIVED_DATA_PATH="${DERIVED_DATA_PATH%-derived}-cli-derived"
+# Fallback for unusual DERIVED_DATA_PATH values that don't end in `-derived`.
+if [[ "$CLI_DERIVED_DATA_PATH" == "$DERIVED_DATA_PATH" ]]; then
+  CLI_DERIVED_DATA_PATH="${DERIVED_DATA_PATH}-cli"
+fi
+
+xcodebuild \
+  -project MacosWidgetsStatsFromWebsite.xcodeproj \
+  -scheme MacosWidgetsStatsFromWebsiteCLI \
+  -configuration Release \
+  -derivedDataPath "$CLI_DERIVED_DATA_PATH" \
+  ${XCODEBUILD_SIGNING_FLAGS[@]+"${XCODEBUILD_SIGNING_FLAGS[@]}"} \
+  build
+
+CLI_BIN_SRC="$CLI_DERIVED_DATA_PATH/Build/Products/Release/macos-widgets-stats-from-website"
+if [[ ! -x "$CLI_BIN_SRC" ]]; then
+  echo "build.sh: ERROR — expected CLI binary not found at $CLI_BIN_SRC" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# STEP 4: copy the CLI binary into the GUI bundle + sign with the right
+# entitlements, then re-seal the parent .app.
+#
+# The CLI lives at Contents/MacOS/macos-widgets-stats-from-website inside the
+# GUI .app bundle (alongside the main GUI executable). MCP configs reference
+# this path directly, e.g.:
+#   /Applications/MacosWidgetsStatsFromWebsite.app/Contents/MacOS/macos-widgets-stats-from-website --mcp-stdio
+# ---------------------------------------------------------------------------
+echo "=== STEP 4: embed CLI binary in GUI bundle + sign ==="
+CLI_BIN_DEST="$APP_PATH/Contents/MacOS/macos-widgets-stats-from-website"
+mkdir -p "$APP_PATH/Contents/MacOS"
+cp "$CLI_BIN_SRC" "$CLI_BIN_DEST"
+
+# Pick the entitlements file used to sign the embedded CLI. In DEV_RESIGN
+# mode the dev file strips the profile-gated entitlements that would
+# otherwise SIGKILL the CLI on launch. In normal mode (CI / profile-backed
+# Release builds) the canonical entitlements file is correct because the
+# embedded provisioning profile satisfies the App Group + keychain
+# entitlements.
+CLI_ENTITLEMENTS_PROD="MacosWidgetsStatsFromWebsite/Apps/CLI/MacosWidgetsStatsFromWebsiteCLI.entitlements"
+CLI_ENTITLEMENTS_DEV="MacosWidgetsStatsFromWebsite/Apps/CLI/MacosWidgetsStatsFromWebsiteCLI.dev.entitlements"
+if [[ "$DEV_RESIGN_FLAG" == "1" ]]; then
+  CLI_ENTITLEMENTS_FOR_SIGN="$CLI_ENTITLEMENTS_DEV"
+  echo "build.sh: CLI signing — DEV_RESIGN=1, using stripped entitlements: $CLI_ENTITLEMENTS_FOR_SIGN"
+else
+  CLI_ENTITLEMENTS_FOR_SIGN="$CLI_ENTITLEMENTS_PROD"
+  echo "build.sh: CLI signing — using canonical entitlements: $CLI_ENTITLEMENTS_FOR_SIGN"
+fi
+
+if [[ ! -f "$CLI_ENTITLEMENTS_FOR_SIGN" ]]; then
+  echo "build.sh: ERROR — CLI entitlements file missing: $CLI_ENTITLEMENTS_FOR_SIGN" >&2
+  exit 1
+fi
+
+# Pick the signing identity for the CLI: prefer the same Apple Development
+# authority used by the parent app (so TeamIdentifier matches across the
+# bundle). Fall back to ad-hoc only if no developer identity is in the
+# keychain — that's the case in CI before the cert is imported, but the
+# release.yml workflow doesn't call this script so it should be a no-op.
+if [[ -z "$APP_DEV_AUTHORITY" ]]; then
+  APP_DEV_AUTHORITY=$(codesign -d -vvv "$APP_PATH" 2>&1 \
+    | awk -F'=' '/^Authority=Apple Development:/ {print $2}' \
+    | head -n1) || true
+  if [[ -z "$APP_DEV_AUTHORITY" ]]; then
+    APP_DEV_AUTHORITY=$(codesign -d -vvv "$APP_PATH" 2>&1 \
+      | awk -F'=' '/^Authority=Developer ID Application:/ {print $2}' \
+      | head -n1) || true
+  fi
+fi
+
+if [[ -n "$APP_DEV_AUTHORITY" ]]; then
+  CLI_SIGN_IDENTITY="$APP_DEV_AUTHORITY"
+  echo "build.sh: CLI signing — identity: $CLI_SIGN_IDENTITY (matching parent app)"
+else
+  CLI_SIGN_IDENTITY="-"
+  echo "build.sh: CLI signing — no developer identity detected; falling back to ad-hoc"
+fi
+
+codesign --force \
+  --options runtime \
+  --sign "$CLI_SIGN_IDENTITY" \
+  --entitlements "$CLI_ENTITLEMENTS_FOR_SIGN" \
+  "$CLI_BIN_DEST"
+
+codesign -v "$CLI_BIN_DEST" >/dev/null 2>&1 \
+  || { echo "build.sh: ERROR — embedded CLI signature failed verification at $CLI_BIN_DEST" >&2; exit 1; }
+echo "build.sh: embedded CLI signed + verified: $CLI_BIN_DEST"
+
+# Re-seal the parent .app so the new file in Contents/MacOS doesn't break
+# the parent's CodeResources hash. We reuse the same xcent / entitlements
+# file that the GUI build originally used so we don't drift signing
+# semantics here — only the file list inside CodeResources needs to be
+# refreshed.
+if [[ "$DEV_RESIGN_FLAG" == "1" ]]; then
+  # In DEV_RESIGN mode we already re-signed the parent above with the
+  # resolved .app.xcent. Use the same xcent again so application-identifier
+  # / keychain-access-groups stay resolved (literal strings, not
+  # $(AppIdentifierPrefix) placeholders).
+  PARENT_RESIGN_ENTITLEMENTS=""
+  if [[ -n "${APP_XCENT:-}" && -f "$APP_XCENT" ]]; then
+    PARENT_RESIGN_ENTITLEMENTS="$APP_XCENT"
+  fi
+else
+  PARENT_RESIGN_ENTITLEMENTS="$DEBUG_ENTITLEMENTS"
+fi
+
+if [[ -n "$PARENT_RESIGN_ENTITLEMENTS" ]]; then
+  echo "build.sh: re-sealing parent .app with entitlements: $PARENT_RESIGN_ENTITLEMENTS"
+  codesign --force \
+    --options runtime \
+    --sign "$CLI_SIGN_IDENTITY" \
+    --entitlements "$PARENT_RESIGN_ENTITLEMENTS" \
+    "$APP_PATH"
+else
+  echo "build.sh: re-sealing parent .app (no entitlements override — preserving original)"
+  codesign --force \
+    --options runtime \
+    --sign "$CLI_SIGN_IDENTITY" \
+    "$APP_PATH"
+fi
+
+codesign -v "$APP_PATH" >/dev/null 2>&1 \
+  || { echo "build.sh: ERROR — parent .app signature failed verification after CLI embed" >&2; exit 1; }
+echo "build.sh: parent .app re-sealed + verified: $APP_PATH"
+
+# ---------------------------------------------------------------------------
+# STEP 5: smoke-test the embedded CLI via --mcp-stdio.
+#
+# We send a single MCP `initialize` JSON-RPC request framed with
+# `Content-Length:` and read the response back. If the CLI returns a valid
+# response and exits cleanly, the bundle is good to ship. If it SIGKILLs or
+# emits garbage, the build fails so a broken bundle never reaches
+# /Applications.
+# ---------------------------------------------------------------------------
+echo "=== STEP 5: smoke-test embedded CLI ==="
+SMOKE_TMP="$(mktemp -d -t macos-widgets-stats-cli-smoke.XXXXXX)"
+trap 'rm -rf "$SMOKE_TMP"' EXIT
+SMOKE_OUT="$SMOKE_TMP/smoke.out"
+SMOKE_ERR="$SMOKE_TMP/smoke.err"
+
+# Build the JSON-RPC initialize request. MCP framing = Content-Length + CRLF.
+SMOKE_REQ_JSON='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"build.sh","version":"0.0.1"}}}'
+SMOKE_REQ_LEN=${#SMOKE_REQ_JSON}
+
+# Send the initialize request, wait up to 8s for a response, then close stdin.
+# The CLI's runStdioServer() should write a response and stay running for
+# more requests; we kill it after we get the response.
+{
+  printf 'Content-Length: %d\r\n\r\n%s' "$SMOKE_REQ_LEN" "$SMOKE_REQ_JSON"
+  sleep 8
+} | "$CLI_BIN_DEST" --mcp-stdio >"$SMOKE_OUT" 2>"$SMOKE_ERR" &
+SMOKE_PID=$!
+
+# Wait briefly for the response, then terminate the CLI cleanly.
+sleep 4
+kill -TERM "$SMOKE_PID" 2>/dev/null || true
+wait "$SMOKE_PID" 2>/dev/null || true
+
+if ! grep -q '"jsonrpc"' "$SMOKE_OUT" 2>/dev/null; then
+  echo "build.sh: ERROR — embedded CLI smoke test failed: no JSON-RPC response on stdout" >&2
+  echo "build.sh: --- CLI stdout (truncated) ---" >&2
+  head -c 2000 "$SMOKE_OUT" >&2 || true
+  echo "" >&2
+  echo "build.sh: --- CLI stderr (truncated) ---" >&2
+  head -c 2000 "$SMOKE_ERR" >&2 || true
+  echo "" >&2
+  exit 1
+fi
+echo "build.sh: embedded CLI smoke test passed (--mcp-stdio initialize round-trip)"
+
+# ---------------------------------------------------------------------------
+# STEP 6: optional install into /Applications.
+#
+# Off by default. Pass --install to opt in. The install step terminates any
+# prior copy of the app (so the AppGroup container isn't locked) and ditto's
+# the assembled bundle in.
+# ---------------------------------------------------------------------------
+if [[ "$INSTALL_FLAG" == "1" ]]; then
+  echo "=== STEP 6: install to /Applications ==="
+  INSTALLED_APP="/Applications/MacosWidgetsStatsFromWebsite.app"
+  # Best-effort terminate any running copy so the file replace doesn't fail.
+  pkill -f "$INSTALLED_APP/Contents/MacOS/MacosWidgetsStatsFromWebsite" 2>/dev/null || true
+  sleep 1
+  ditto "$APP_PATH" "$INSTALLED_APP"
+  codesign -v "$INSTALLED_APP" >/dev/null 2>&1 \
+    || { echo "build.sh: ERROR — installed .app failed signature verification at $INSTALLED_APP" >&2; exit 1; }
+  echo "build.sh: installed to $INSTALLED_APP"
+else
+  echo "build.sh: --install not passed; not copying to /Applications."
+  echo "build.sh:   Assembled bundle: $APP_PATH"
+  echo "build.sh:   Embedded CLI:     $CLI_BIN_DEST"
+fi
+
+echo "build.sh: done."
