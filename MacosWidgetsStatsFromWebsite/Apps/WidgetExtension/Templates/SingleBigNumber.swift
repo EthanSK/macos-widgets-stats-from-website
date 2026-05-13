@@ -12,10 +12,15 @@ struct SingleBigNumberTemplate: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Tracker names like "claude weekly usage" don't fit in one line of
+            // .caption2 in a systemSmall widget, so we allow up to 2 lines with
+            // a modest minimumScaleFactor as a final fallback for very long
+            // labels. Single-line names still render identically.
             Text(item?.title ?? "Tracker")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
 
             Spacer(minLength: 0)
 
