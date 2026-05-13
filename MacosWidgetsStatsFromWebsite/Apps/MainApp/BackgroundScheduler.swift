@@ -115,10 +115,21 @@ final class BackgroundScheduler: ObservableObject {
         let identifier = "com.ethansk.macos-widgets-stats-from-website.scrape.\(tracker.id.uuidString)"
         let scheduler = schedulers[tracker.id] ?? NSBackgroundActivityScheduler(identifier: identifier)
         scheduler.invalidate()
-        scheduler.interval = TimeInterval(max(60, tracker.refreshIntervalSec))
+        let interval = TimeInterval(max(60, tracker.refreshIntervalSec))
+        scheduler.interval = interval
         scheduler.tolerance = TimeInterval(max(30, tracker.refreshIntervalSec / 5))
         scheduler.repeats = true
         schedulers[tracker.id] = scheduler
+
+        // Log every (re)schedule so we can verify hot-reload mechanism is
+        // working without having to instrument from outside the app.
+        // Filter with: `log show --predicate 'subsystem == "..."' --info`
+        // or grep activity.log.
+        ActivityLogger.log("scheduler", "rescheduled", metadata: [
+            "trackerID": tracker.id.uuidString,
+            "trackerName": tracker.name,
+            "intervalSec": "\(Int(interval))"
+        ])
 
         scheduler.schedule { [weak self] completion in
             guard let self,

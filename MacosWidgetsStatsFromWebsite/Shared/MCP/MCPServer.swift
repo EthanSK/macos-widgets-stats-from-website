@@ -1662,9 +1662,46 @@ private enum MCPToolDispatcher {
         value as? [String]
     }
 
+    /// Notifies the running main app that on-disk tracker / widget config has
+    /// changed and the BackgroundScheduler needs to re-read it. Posts to TWO
+    /// channels because MCP can be served from one of two process contexts:
+    ///
+    /// 1. Embedded socket MCP — running INSIDE the main app process. The
+    ///    in-process `NotificationCenter` post lands directly in the
+    ///    `MacosWidgetsStatsFromWebsiteApp` scene's `.onReceive`, which calls
+    ///    `store.reloadFromDisk() + backgroundScheduler.sync()`.
+    ///
+    /// 2. Stdio CLI MCP — running in a SEPARATE process (spawned by Claude
+    ///    Code et al.). The in-process NotificationCenter post lands inside
+    ///    the CLI's own process and is dropped on the floor; the main app
+    ///    never hears about it. To bridge this gap, we ALSO write the
+    ///    pre-existing `reloadTimelinesSentinel` file — the main app's
+    ///    `BackgroundScheduler.drainPendingScrapeRequests()` file-watcher
+    ///    picks it up within milliseconds and runs the same
+    ///    `store.reloadFromDisk() + sync() + reloadAllTimelines()` chain.
+    ///
+    /// Before this dual-channel push (≤0.17.5), tracker config changes made
+    /// from the stdio CLI MCP were quietly invisible to the running
+    /// BackgroundScheduler — e.g. changing refreshIntervalSec from 1800 to
+    /// 600 wouldn't reschedule the timer until the next app restart.
     private static func notifyConfigurationChanged() {
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .mcpConfigurationChanged, object: nil)
+        }
+
+        // Best-effort cross-process bridge. Failure is non-fatal because the
+        // in-process post above handles the embedded-socket case; we only
+        // lose hot-reload on the stdio path in pathological cases (App Group
+        // container unavailable, disk full).
+        do {
+            try PendingScrapeRequestStore.requestScrape(
+                trackerID: PendingScrapeRequest.reloadTimelinesSentinel
+            )
+        } catch {
+            MCPInvocationLogger.logSystem(
+                "config-changed-sentinel-failed",
+                detail: error.localizedDescription
+            )
         }
     }
 
