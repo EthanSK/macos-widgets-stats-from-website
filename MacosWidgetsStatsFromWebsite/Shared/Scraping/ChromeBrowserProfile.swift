@@ -178,11 +178,91 @@ final class ChromeBrowserProfile {
         }
     }
 
+    /// Sentinel file dropped into the user-data-dir whenever this app spawns a Chrome
+    /// instance via `launch(browser:configuration:foreground:)`. Its presence proves the
+    /// instance currently bound to this CDP port is ours and therefore safe to close —
+    /// even when the live User-Agent has been masked (e.g. `--user-agent=<custom>` strips
+    /// "HeadlessChrome" from the default UA, which used to fool the CDP probe into
+    /// classifying the instance as "headed" and refusing to close it).
+    ///
+    /// See `markUserDataDirAsAppSpawned(configuration:foreground:)` for write logic and
+    /// `isUserDataDirAppSpawned(configuration:)` for the read.
+    private static let appSpawnedSentinelFilename = ".macos-widgets-stats-from-website-spawned"
+
+    private func appSpawnedSentinelURL(configuration: ChromeBrowserLaunchConfiguration) -> URL {
+        configuration.userDataDirectory
+            .appendingPathComponent(Self.appSpawnedSentinelFilename, isDirectory: false)
+    }
+
+    /// Writes the sentinel file into `userDataDirectory` containing PID + ISO timestamp +
+    /// foreground/background tag. Safe to call repeatedly; later writes overwrite earlier
+    /// ones with the most recent spawn metadata.
+    ///
+    /// Called from `launch()` directly after `process.run()` succeeds. Failure to write
+    /// is logged but non-fatal — the headed/headless heuristic will fall back to the
+    /// pre-existing UA/PS probes, which are still correct in the no-UA-masking case.
+    private func markUserDataDirAsAppSpawned(
+        configuration: ChromeBrowserLaunchConfiguration,
+        pid: Int32,
+        foreground: Bool
+    ) {
+        let url = appSpawnedSentinelURL(configuration: configuration)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let contents = """
+        pid=\(pid)
+        ts=\(formatter.string(from: Date()))
+        mode=\(foreground ? "foreground" : "headless")
+        bundleID=\(Bundle.main.bundleIdentifier ?? "unknown")
+        """
+        do {
+            try contents.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            ActivityLogger.log("browser", "failed to write app-spawned sentinel", metadata: [
+                "profile": configuration.profileName,
+                "port": "\(configuration.cdpPort)",
+                "path": url.path,
+                "error": error.localizedDescription
+            ])
+        }
+    }
+
+    /// Reads-only check: is the sentinel file present in the user-data-dir for this
+    /// configuration? Presence means a previous (or current) app session spawned the
+    /// Chrome bound to this CDP port, so it's owned by us and safe to close.
+    ///
+    /// Note: we deliberately do NOT validate the PID inside the sentinel — a 2-day-old
+    /// orphaned headless still has the sentinel from when it was spawned, and that's
+    /// exactly the case we want to recognize and clean up. The fact that the sentinel
+    /// exists at all is sufficient proof of ownership.
+    private func isUserDataDirAppSpawned(configuration: ChromeBrowserLaunchConfiguration) -> Bool {
+        let url = appSpawnedSentinelURL(configuration: configuration)
+        return fileManager.fileExists(atPath: url.path)
+    }
+
     /// Returns true if the dedicated Chrome instance currently serving this CDP port
-    /// was launched as a background headless instance (via `--headless=new`). Detected
-    /// either from our in-process tracking (the headless was spawned in this app session)
-    /// or from the Chrome DevTools `/json/version` User-Agent exposed by the
-    /// dedicated CDP port. `ps` is only a best-effort fallback for unsandboxed builds.
+    /// was launched by this app (and therefore is safe to close via CDP). Detected in
+    /// order of certainty:
+    ///   1. In-process tracking — we spawned it in this app session.
+    ///   2. Sentinel file in the user-data-dir — we spawned it in a previous session.
+    ///   3. CDP `/json/version` User-Agent containing "HeadlessChrome" — legacy heuristic.
+    ///   4. `ps` argv scan for `--headless` on the parent process — unsandboxed-fallback.
+    ///
+    /// The sentinel check (#2) is the durable fix for the UA-masking bug: when we spawn
+    /// Chrome with `--user-agent=<custom>` the default UA's "HeadlessChrome" tag is
+    /// stripped, so #3 returns false even though the instance is ours. #2 returns true
+    /// regardless of UA because the sentinel is written at spawn time. See
+    /// `markUserDataDirAsAppSpawned`.
+    ///
+    /// XCTest target is not yet configured for this project; the test cases that should
+    /// be added once it exists:
+    ///   - probe result `userAgentContainsHeadless=false` + sentinel PRESENT
+    ///     → expect `isExistingInstanceHeadless == true` (treatAsOursAndClose).
+    ///   - probe result `userAgentContainsHeadless=false` + sentinel ABSENT
+    ///     → expect `isExistingInstanceHeadless == false` (preserves the existing
+    ///       "don't kill external Chrome" safety — only our spawns get closed).
+    ///   - probe result `userAgentContainsHeadless=true` (legacy default-UA case)
+    ///     → expect `isExistingInstanceHeadless == true` regardless of sentinel.
     private func isExistingInstanceHeadless(configuration: ChromeBrowserLaunchConfiguration) -> Bool {
         let port = configuration.cdpPort
 
@@ -200,9 +280,22 @@ final class ChromeBrowserProfile {
         }
 
         // No in-process tracking (e.g. the dedicated Chrome was started by a previous app
-        // session). Probe the dedicated CDP endpoint first: Release builds are sandboxed
-        // and cannot exec `/bin/ps`, but they can still talk to the Chrome instance they
-        // launched on localhost.
+        // session). Sentinel-file check is the primary durable signal — it's UA-independent
+        // and survives across app restarts. If the sentinel is present, the instance is
+        // ours; treat it as closable regardless of what UA-masking flags we may have used.
+        if isUserDataDirAppSpawned(configuration: configuration) {
+            ActivityLogger.log("browser", "headless-detection via sentinel — treating as app-owned", metadata: [
+                "profile": configuration.profileName,
+                "port": "\(configuration.cdpPort)",
+                "sentinelPath": appSpawnedSentinelURL(configuration: configuration).path,
+                "result": "app-owned"
+            ])
+            return true
+        }
+
+        // Sentinel absent (e.g. a user-launched Chrome happens to be on the same CDP port,
+        // OR the user-data-dir was wiped). Fall back to the CDP-UA heuristic — still valid
+        // for default-UA builds where we haven't overridden `--user-agent`.
         if let cdpHeadless = findDedicatedHeadlessChromeViaCDP(configuration: configuration) {
             return cdpHeadless
         }
@@ -502,9 +595,13 @@ final class ChromeBrowserProfile {
                     // but that set only tracks visibility marked in THIS app session. A
                     // user-visible Chrome started by a previous app session bound to the same
                     // CDP port wouldn't appear in `userVisiblePorts` and would otherwise get
-                    // closed here. Confirm the existing instance is headless before issuing
-                    // the CDP-close. `isExistingInstanceHeadless` returns false when the
-                    // instance is headed OR when probing fails — in either case, skip.
+                    // closed here. Confirm the existing instance is app-owned before issuing
+                    // the CDP-close. `isExistingInstanceHeadless` checks (in order): in-process
+                    // tracking, the spawn-sentinel file in `--user-data-dir` (UA-independent,
+                    // survives across app restarts — the durable fix for the UA-masking bug),
+                    // then the legacy CDP-UA + ps heuristics. It returns false only when the
+                    // instance is plausibly external/user-owned OR when probing fails — in
+                    // either case, skip the close.
                     if self.isExistingInstanceHeadless(configuration: configuration) {
                         self.requestBrowserCloseViaCDP(configuration: configuration) {
                             ActivityLogger.log("browser", "closed app-owned background Chrome after scrape via CDP", metadata: [
@@ -513,7 +610,7 @@ final class ChromeBrowserProfile {
                             ])
                         }
                     } else {
-                        ActivityLogger.log("browser", "skipped CDP close — instance not confirmed headless", metadata: [
+                        ActivityLogger.log("browser", "skipped CDP close — instance not confirmed app-owned", metadata: [
                             "profile": configuration.profileName,
                             "port": "\(port)"
                         ])
@@ -743,6 +840,17 @@ final class ChromeBrowserProfile {
         }
 
         try process.run()
+
+        // Drop a sentinel file inside `--user-data-dir` so any later session (or this one
+        // after a UA-masking flag strips "HeadlessChrome" from the default UA) can prove
+        // the Chrome bound to this CDP port is ours and therefore safe to close. The
+        // sentinel write is best-effort — failure is logged inside the helper and the
+        // fall-back UA/PS probes still apply.
+        markUserDataDirAsAppSpawned(
+            configuration: configuration,
+            pid: process.processIdentifier,
+            foreground: foreground
+        )
 
         ActivityLogger.log("browser", foreground ? "spawned dedicated Chrome instance" : "launched headless app-owned Chrome", metadata: [
             "profile": configuration.profileName,
