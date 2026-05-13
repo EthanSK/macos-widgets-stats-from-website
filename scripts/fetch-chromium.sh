@@ -198,6 +198,31 @@ get_revision() {
     eval "printf '%s\n' \"\${REVISION_${1}:-}\""
 }
 
+# Fast-path no-op: if a complete cached install exists for every requested
+# arch (VERSION marker present + launchable executable per arch), we can
+# skip the network probe for LAST_CHANGE entirely. This makes the build
+# resilient to transient google-storage outages — once Chromium is cached,
+# offline rebuilds work indefinitely. To force a refresh-to-latest run
+# `fetch-chromium.sh --force` or delete `vendor/chromium/VERSION`.
+if [ "$FORCE" = "0" ] && [ -f "$VENDOR_ROOT/VERSION" ]; then
+    cached_ok=1
+    for arch in $ARCHES; do
+        exe="$VENDOR_ROOT/$arch/Chromium.app/Contents/MacOS/Chromium"
+        if [ ! -x "$exe" ]; then
+            cached_ok=0
+            break
+        fi
+        if ! /usr/bin/grep -Eq "^$arch=[0-9]+$" "$VENDOR_ROOT/VERSION"; then
+            cached_ok=0
+            break
+        fi
+    done
+    if [ "$cached_ok" = "1" ]; then
+        echo "fetch-chromium.sh: cached Chromium present for all requested arches — skipping network probe (use --force to refresh)."
+        exit 0
+    fi
+fi
+
 for arch in $ARCHES; do
     platform="$(bucket_platform_for_arch "$arch")"
     if [ -z "$platform" ]; then
