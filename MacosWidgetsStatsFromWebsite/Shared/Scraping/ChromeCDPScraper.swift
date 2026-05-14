@@ -111,7 +111,7 @@ final class ChromeCDPScraper {
             client.connect()
             client.prepareOpenClawStylePage { [weak self] in
                 DispatchQueue.main.async {
-                    self?.waitForSelector(deadline: Date().addingTimeInterval(12))
+                    self?.waitForSelector(deadline: Date().addingTimeInterval(25))
                 }
             }
         case .failure(let error):
