@@ -347,16 +347,60 @@ final class ChromeCDPScraper {
 
         didComplete = true
         timeout?.cancel()
-        client?.close()
-        if let configuration, let target {
-            ChromeBrowserProfile.shared.closeTarget(id: target.id, configuration: configuration)
+
+        // Tab-leak fix (v0.17.x): close the page target BEFORE the rest of the
+        // teardown. The previous flow cancelled the websocket via `client.close()`
+        // and then fired a fire-and-forget HTTP `/json/close/<id>`; under load
+        // the REST call did not always reach Chromium in time, leaving tabs
+        // open and the headless Chrome's RAM growing per scrape iteration
+        // (Ethan voice 2964 — "loads of tabs open in the manual Chromium").
+        //
+        // Primary path: send `Page.close` over the existing page websocket
+        // (best-effort, 1s timeout). The browser disposes of the target as
+        // part of the protocol command, so this is the most reliable single
+        // tab close path.
+        //
+        // Belt-and-suspenders: still call `closeTarget` (REST `/json/close`)
+        // afterwards in case the websocket was already gone — it's now logged
+        // so we can audit any future leaks via the activity log. The REST
+        // call is idempotent against already-closed targets (Chromium returns
+        // 404, which we log but don't surface as an error).
+        let captured = self
+        let teardown: () -> Void = {
+            DispatchQueue.main.async {
+                captured.client?.close()
+                if let configuration = captured.configuration, let target = captured.target {
+                    ChromeBrowserProfile.shared.closeTarget(id: target.id, configuration: configuration)
+                }
+                if let backgroundUseConfiguration = captured.backgroundUseConfiguration {
+                    ChromeBrowserProfile.shared.endBackgroundUse(configuration: backgroundUseConfiguration)
+                }
+                ActivityLogger.log("scrape", captured.logMessage(for: result), metadata: captured.logMetadata(for: result))
+                captured.completion(result)
+                Self.activeScrapers[captured.scrapeID] = nil
+            }
         }
-        if let backgroundUseConfiguration {
-            ChromeBrowserProfile.shared.endBackgroundUse(configuration: backgroundUseConfiguration)
+
+        if let client = client, target != nil {
+            client.closePageTarget { closeResult in
+                switch closeResult {
+                case .success:
+                    ActivityLogger.log("scrape", "closed scrape tab via Page.close", metadata: [
+                        "tracker": captured.tracker.id.uuidString,
+                        "target": captured.target?.id ?? ""
+                    ])
+                case .failure(let error):
+                    ActivityLogger.log("scrape", "Page.close failed; falling back to REST close", metadata: [
+                        "tracker": captured.tracker.id.uuidString,
+                        "target": captured.target?.id ?? "",
+                        "error": error.localizedDescription
+                    ])
+                }
+                teardown()
+            }
+        } else {
+            teardown()
         }
-        ActivityLogger.log("scrape", logMessage(for: result), metadata: logMetadata(for: result))
-        completion(result)
-        Self.activeScrapers[scrapeID] = nil
     }
 
     private func logMessage(for result: Result<TrackerReading, Error>) -> String {

@@ -672,13 +672,37 @@ final class ChromeBrowserProfile {
         }
     }
 
+    /// Fire-and-forget HTTP `/json/close/<id>` fallback. The primary tab-close
+    /// path lives in `ChromeCDPClient.closePageTarget` (sends `Page.close` over
+    /// the existing page websocket BEFORE the websocket is cancelled) — this
+    /// REST call is kept as a belt-and-suspenders cleanup for the case where
+    /// the websocket was already dead when `finish()` ran. Logged so we can
+    /// audit tab-leak claims via the activity log.
     func closeTarget(id: String, configuration: ChromeBrowserLaunchConfiguration) {
         guard !id.isEmpty,
               let url = URL(string: "/json/close/\(id)", relativeTo: configuration.cdpURL)?.absoluteURL else {
             return
         }
 
-        URLSession.shared.dataTask(with: url).resume()
+        URLSession.shared.dataTask(with: url) { _, response, error in
+            if let error {
+                ActivityLogger.log("browser", "REST tab close failed", metadata: [
+                    "profile": configuration.profileName,
+                    "port": "\(configuration.cdpPort)",
+                    "target": id,
+                    "error": error.localizedDescription
+                ])
+                return
+            }
+
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            ActivityLogger.log("browser", "REST tab close request completed", metadata: [
+                "profile": configuration.profileName,
+                "port": "\(configuration.cdpPort)",
+                "target": id,
+                "status": "\(status)"
+            ])
+        }.resume()
     }
 
     func bestExistingPageTarget(

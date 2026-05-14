@@ -61,6 +61,42 @@ final class ChromeCDPClient {
         }
     }
 
+    /// Send `Page.close` to the connected page-level CDP target so Chromium
+    /// drops the tab and frees its memory. Must be called BEFORE `close()` —
+    /// once the websocket is cancelled the page-level RPC can no longer be
+    /// delivered, and Chromium leaves the tab open as a zombie that consumes
+    /// RAM for every subsequent scrape iteration.
+    ///
+    /// The call is best-effort with a 1-second timeout: in either the success
+    /// or timeout case the completion fires exactly once so the caller can
+    /// proceed to `close()` + the `/json/close/<id>` REST fallback without
+    /// risking a hung scrape.
+    func closePageTarget(completion: @escaping (Result<Void, Error>) -> Void) {
+        let lock = NSLock()
+        var didFinish = false
+
+        func finishOnce(_ result: Result<Void, Error>) {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !didFinish else { return }
+            didFinish = true
+            completion(result)
+        }
+
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
+            finishOnce(.failure(ChromeCDPClientError.protocolError("Page.close timed out after 1s")))
+        }
+
+        send(method: "Page.close") { result in
+            switch result {
+            case .success:
+                finishOnce(.success(()))
+            case .failure(let error):
+                finishOnce(.failure(error))
+            }
+        }
+    }
+
     func evaluate(
         _ expression: String,
         returnByValue: Bool = true,
