@@ -24,13 +24,7 @@ struct SingleBigNumberTemplate: View {
 
             Spacer(minLength: 0)
 
-            Text(item?.value ?? "--")
-                .font(.system(size: 48, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .numericValueTransition()
-                .minimumScaleFactor(0.45)
-                .lineLimit(1)
-                .foregroundStyle(statusColor)
+            heroValueText
                 .frame(maxWidth: .infinity, alignment: .center)
 
             Spacer(minLength: 0)
@@ -49,19 +43,36 @@ struct SingleBigNumberTemplate: View {
         .accessibilityLabel(Text("\(item?.title ?? "Tracker"), \(item?.value ?? "no value"), updated \(item?.updatedText ?? "never")"))
     }
 
-    private var statusColor: Color {
-        // Broken/stale states take precedence — surfacing a green or red
-        // gradient color on a broken tracker would lie about its health.
+    /// Big-number text with the right foregroundStyle for the current
+    /// status. We branch at the view level (instead of computing a single
+    /// `ShapeStyle`) because `LinearGradient` and `Color` don't share a
+    /// concrete type — we'd otherwise have to erase to `AnyShapeStyle`
+    /// which still leaks vibrancy desaturation on solid colors. Branching
+    /// in @ViewBuilder land keeps each branch with its native style type.
+    @ViewBuilder
+    private var heroValueText: some View {
+        let base = Text(item?.value ?? "--")
+            .font(.system(size: 48, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .numericValueTransition()
+            .minimumScaleFactor(0.45)
+            .lineLimit(1)
+
         switch item?.status {
         case .broken:
-            return .red
+            base.foregroundStyle(Color.red)
         case .stale, nil:
-            return .secondary
+            base.foregroundStyle(Color.secondary)
         case .ok:
-            // gradientColor is nil when the tracker has `.none` or no numeric
-            // reading, in which case we fall back to the default primary
-            // text color — preserving existing behavior for older trackers.
-            return item?.gradientColor ?? .primary
+            // Prefer the LinearGradient variant: macOS desktop widgets
+            // desaturate solid Color foregroundStyles behind the vibrancy
+            // material, but LinearGradient survives. Falls back to .primary
+            // when the tracker has gradient disabled / no numeric reading.
+            if let gradient = item?.gradientStyle {
+                base.foregroundStyle(gradient)
+            } else {
+                base.foregroundStyle(.primary)
+            }
         }
     }
 

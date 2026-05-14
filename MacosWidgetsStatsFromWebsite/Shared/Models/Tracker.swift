@@ -35,11 +35,38 @@ enum GradientMode: String, Codable, CaseIterable, Equatable {
     }
 }
 
+/// Optional numeric transform applied to `currentNumeric` BEFORE the
+/// gradient interpolation and BEFORE the value is rendered in the widget.
+/// Use this when the scraped value represents one half of a complementary
+/// pair (e.g. "% used") but you want the widget to communicate the other
+/// half (e.g. "% remaining"). The transform is symmetric — flip the
+/// gradient mode accordingly (highIsBad → highIsGood or vice versa) so
+/// the color sweep still reads correctly under the new framing.
+///
+/// `.none` — display the raw scraped value (current behavior).
+/// `.invertFromHundred` — display `100 - numeric`. Useful for usage
+///                         percentages that should read as "amount
+///                         remaining" instead of "amount used".
+enum ValueTransform: String, Codable, CaseIterable, Equatable {
+    case none
+    case invertFromHundred
+
+    var displayName: String {
+        switch self {
+        case .none:
+            return "As-is"
+        case .invertFromHundred:
+            return "100 minus value (remaining)"
+        }
+    }
+}
+
 struct Tracker: Codable, Identifiable {
     static let defaultBrowserProfile = "macos-widgets-stats-from-website"
     static let defaultIcon = "chart.line.uptrend.xyaxis"
     static let defaultAccentColorHex = "#10a37f"
     static let defaultGradientMode: GradientMode = .none
+    static let defaultValueTransform: ValueTransform = .none
 
     var id: UUID
     var name: String
@@ -53,6 +80,7 @@ struct Tracker: Codable, Identifiable {
     var icon: String
     var accentColorHex: String
     var gradientMode: GradientMode
+    var valueTransform: ValueTransform
     var valueParser: ValueParser
     var history: TrackerHistory
     var hideElements: [String]
@@ -70,6 +98,7 @@ struct Tracker: Codable, Identifiable {
         icon: String = Tracker.defaultIcon,
         accentColorHex: String = Tracker.defaultAccentColorHex,
         gradientMode: GradientMode = Tracker.defaultGradientMode,
+        valueTransform: ValueTransform = Tracker.defaultValueTransform,
         valueParser: ValueParser = ValueParser(),
         history: TrackerHistory = TrackerHistory(),
         hideElements: [String] = []
@@ -86,6 +115,7 @@ struct Tracker: Codable, Identifiable {
         self.icon = icon
         self.accentColorHex = accentColorHex
         self.gradientMode = gradientMode
+        self.valueTransform = valueTransform
         self.valueParser = valueParser
         self.history = history
         self.hideElements = hideElements
@@ -113,6 +143,10 @@ struct Tracker: Codable, Identifiable {
         // get a surprise color change on existing trackers.
         gradientMode = try container.decodeIfPresent(GradientMode.self, forKey: .gradientMode)
             ?? Tracker.defaultGradientMode
+        // valueTransform was added in 0.17.9; default to .none on migration so
+        // existing trackers continue to display the raw scraped value.
+        valueTransform = try container.decodeIfPresent(ValueTransform.self, forKey: .valueTransform)
+            ?? Tracker.defaultValueTransform
         valueParser = try container.decodeIfPresent(ValueParser.self, forKey: .valueParser) ?? ValueParser()
         history = try container.decodeIfPresent(TrackerHistory.self, forKey: .history) ?? TrackerHistory()
         hideElements = try container.decodeIfPresent([String].self, forKey: .hideElements) ?? []

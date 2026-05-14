@@ -112,6 +112,18 @@ struct TrackerEditorView: View {
                             Text(mode.displayName).tag(mode)
                         }
                     }
+
+                    // Value transform optionally rewrites the numeric reading
+                    // before display + gradient interpolation. e.g. for a
+                    // "Claude weekly usage: 1%" reading, `.invertFromHundred`
+                    // displays it as "99% remaining" — and the gradient
+                    // interpolates on 99 instead of 1, so the user typically
+                    // wants to flip gradientMode at the same time.
+                    Picker("Value display", selection: $draft.valueTransform) {
+                        ForEach(ValueTransform.allCases, id: \.self) { transform in
+                            Text(transform.displayName).tag(transform)
+                        }
+                    }
                 } header: {
                     Text("Presentation")
                 }

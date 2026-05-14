@@ -52,6 +52,35 @@ enum GradientColor {
         return interpolate(position: position)
     }
 
+    /// LinearGradient variant of `color(numeric:mode:)`. macOS desktop
+    /// widgets apply a vibrancy material that DESATURATES solid `Color`
+    /// foregroundStyles — even `.red` renders as gray-white in production.
+    /// A LinearGradient (even a degenerate 2-stop with identical start +
+    /// end colors) is recognised as a "real" shape style by WidgetKit and
+    /// survives the vibrancy pass with its hue intact.
+    ///
+    /// We render a 2-stop gradient with a slight lightness modulation
+    /// (start = base, end = base lightened by ~12%) so the result reads as
+    /// a true colored text body in widget chrome, not a flat fill that
+    /// might still get treated as a single uniform tint.
+    ///
+    /// - Returns: LinearGradient suitable for `.foregroundStyle(...)`, or
+    ///   nil when the tracker has gradient disabled / no numeric reading.
+    static func gradient(numeric: Double?, mode: GradientMode) -> LinearGradient? {
+        guard let base = color(numeric: numeric, mode: mode) else {
+            return nil
+        }
+
+        return LinearGradient(
+            stops: [
+                Gradient.Stop(color: base, location: 0.0),
+                Gradient.Stop(color: base.lightened(by: 0.12), location: 1.0)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
     /// Three-stop hue interpolation, `position` in [0, 1]:
     ///   0.0 → green (hue 142°)
     ///   0.5 → yellow (hue 50°)
@@ -76,5 +105,26 @@ enum GradientColor {
 
         // SwiftUI Color takes hue 0..1, not degrees.
         return Color(hue: hue / 360.0, saturation: 0.72, brightness: 0.85)
+    }
+}
+
+private extension Color {
+    /// Returns a copy of this color with brightness pushed up by `amount`
+    /// (0..1). Used to manufacture a 2-stop LinearGradient that survives
+    /// the macOS widget vibrancy material — a degenerate same-color
+    /// gradient still desaturates, but a slight tonal sweep stays colored.
+    func lightened(by amount: Double) -> Color {
+        let ns = NSColor(self)
+        guard let rgb = ns.usingColorSpace(.deviceRGB) else {
+            return self
+        }
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        rgb.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+
+        let newBrightness = min(1.0, brightness + CGFloat(amount))
+        return Color(hue: Double(hue), saturation: Double(saturation), brightness: Double(newBrightness))
     }
 }

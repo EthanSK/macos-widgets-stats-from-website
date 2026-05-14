@@ -567,10 +567,11 @@ private enum MCPToolCatalog {
             "icon": stringSchema("SF Symbol name"),
             "accentColorHex": stringSchema("Hex accent color, e.g. #10a37f"),
             "gradientMode": gradientModeSchema(),
+            "valueTransform": valueTransformSchema(),
             "refreshIntervalSec": intSchema("Refresh interval in seconds"),
             "hideElements": arraySchema(stringSchema("CSS selector to hide before snapshots"))
         ], required: ["name", "url", "selector"]),
-        tool("update_tracker", "Modify tracker fields such as name, URL, label, icon, refresh interval, mode, selector, element bounds, or hidden snapshot selectors. Includes gradientMode for coloring the big-number value (red↔green sweep based on whether high values are bad or good).", [
+        tool("update_tracker", "Modify tracker fields such as name, URL, label, icon, refresh interval, mode, selector, element bounds, or hidden snapshot selectors. Includes gradientMode for coloring the big-number value (red↔green sweep based on whether high values are bad or good), and valueTransform for displaying e.g. '99 remaining' instead of '1% used'.", [
             "id": stringSchema("Tracker UUID"),
             "name": stringSchema("Tracker name"),
             "url": stringSchema("HTTPS URL, or http://localhost for testing"),
@@ -581,6 +582,7 @@ private enum MCPToolCatalog {
             "icon": stringSchema("SF Symbol name"),
             "accentColorHex": stringSchema("Hex accent color, e.g. #10a37f"),
             "gradientMode": gradientModeSchema(),
+            "valueTransform": valueTransformSchema(),
             "refreshIntervalSec": intSchema("Refresh interval in seconds"),
             "hideElements": arraySchema(stringSchema("CSS selector to hide before snapshots"))
         ], required: ["id"]),
@@ -694,6 +696,14 @@ private enum MCPToolCatalog {
             "type": "string",
             "enum": GradientMode.allCases.map(\.rawValue),
             "description": "Gradient color for the big-number value text. 'highIsBad' = 0 green → 100 red. 'highIsGood' = 0 red → 100 green. 'none' = default text color (no gradient)."
+        ]
+    }
+
+    private static func valueTransformSchema() -> [String: Any] {
+        [
+            "type": "string",
+            "enum": ValueTransform.allCases.map(\.rawValue),
+            "description": "Numeric transform applied before rendering. 'none' shows the raw scraped value. 'invertFromHundred' shows (100 - numeric) — useful for usage percentages that should read as 'remaining' instead of 'used'. When using invertFromHundred, you typically also want to flip gradientMode (highIsBad ↔ highIsGood) so the color sweep still matches the new framing."
         ]
     }
 
@@ -836,6 +846,7 @@ private enum MCPToolDispatcher {
             icon: (arguments["icon"] as? String)?.nilIfEmpty ?? Tracker.defaultIcon,
             accentColorHex: (arguments["accentColorHex"] as? String)?.nilIfEmpty ?? Tracker.defaultAccentColorHex,
             gradientMode: try gradientModeArgument(arguments["gradientMode"]) ?? Tracker.defaultGradientMode,
+            valueTransform: try valueTransformArgument(arguments["valueTransform"]) ?? Tracker.defaultValueTransform,
             hideElements: stringArrayArgument("hideElements", arguments) ?? []
         )
 
@@ -875,6 +886,9 @@ private enum MCPToolDispatcher {
             }
             if let mode = try gradientModeArgument(arguments["gradientMode"]) {
                 tracker.gradientMode = mode
+            }
+            if let transform = try valueTransformArgument(arguments["valueTransform"]) {
+                tracker.valueTransform = transform
             }
             if let value = intArgument("refreshIntervalSec", arguments) {
                 tracker.refreshIntervalSec = max(1, value)
@@ -1445,6 +1459,7 @@ private enum MCPToolDispatcher {
             "icon": tracker.icon,
             "accentColorHex": tracker.accentColorHex,
             "gradientMode": tracker.gradientMode.rawValue,
+            "valueTransform": tracker.valueTransform.rawValue,
             "hideElements": tracker.hideElements,
             "reading": AppGroupStore.reading(for: tracker.id).map { readingPayload($0, includeHistory: includeHistory) } as Any? ?? NSNull()
         ]
@@ -1671,6 +1686,21 @@ private enum MCPToolDispatcher {
             throw MCPError.invalidParams("gradientMode must be one of: \(allowed).")
         }
         return mode
+    }
+
+    /// Parses a `valueTransform` argument. Returns nil when the caller
+    /// omitted the field (preserves existing value on update). Throws
+    /// `MCPError.invalidParams` on unknown values so typos surface early
+    /// instead of silently being ignored.
+    private static func valueTransformArgument(_ value: Any?) throws -> ValueTransform? {
+        guard let rawString = value as? String else {
+            return nil
+        }
+        guard let transform = ValueTransform(rawValue: rawString) else {
+            let allowed = ValueTransform.allCases.map(\.rawValue).joined(separator: ", ")
+            throw MCPError.invalidParams("valueTransform must be one of: \(allowed).")
+        }
+        return transform
     }
 
     private static func widgetTemplateArgument(_ value: Any?) -> WidgetTemplate? {

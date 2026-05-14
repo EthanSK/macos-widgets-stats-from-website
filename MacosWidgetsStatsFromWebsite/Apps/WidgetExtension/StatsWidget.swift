@@ -506,6 +506,36 @@ struct StatsWidget: Widget {
     }
 }
 
+extension View {
+    /// Apply the gradient `foregroundStyle` for the hero number text in
+    /// every multi-tracker template. Prefers the `LinearGradient` over a
+    /// solid `Color` so the hue survives the macOS desktop widget vibrancy
+    /// material — solid colors get desaturated to gray-white behind the
+    /// vibrancy compositor, but LinearGradient is rendered onto the widget
+    /// canvas with its hue intact. Falls back to `.primary` when the
+    /// tracker has gradient disabled, has no numeric reading, or is in
+    /// snapshot mode.
+    @ViewBuilder
+    func trackerGradientStyle(_ item: WidgetTrackerItem) -> some View {
+        if let gradient = item.gradientStyle {
+            self.foregroundStyle(gradient)
+        } else {
+            self.foregroundStyle(.primary)
+        }
+    }
+
+    /// Optional-item overload used by single-tracker templates that store
+    /// the item as `WidgetTrackerItem?`. nil item → `.primary` fallback.
+    @ViewBuilder
+    func trackerGradientStyle(_ item: WidgetTrackerItem?) -> some View {
+        if let item, let gradient = item.gradientStyle {
+            self.foregroundStyle(gradient)
+        } else {
+            self.foregroundStyle(.primary)
+        }
+    }
+}
+
 struct WidgetTrackerItem: Identifiable {
     let tracker: Tracker
     let reading: TrackerReading?
@@ -519,6 +549,15 @@ struct WidgetTrackerItem: Identifiable {
     }
 
     var value: String {
+        // valueTransform rewrites the displayed value before falling back to
+        // the raw scraped string. For .invertFromHundred we compute
+        // (100 - numeric) and re-format it as a percentage so trackers like
+        // "claude weekly: 1% used" read as "99% remaining" in the widget.
+        if tracker.valueTransform == .invertFromHundred, let raw = reading?.currentNumeric {
+            let inverted = max(0.0, min(100.0, 100.0 - raw))
+            return formattedInvertedValue(inverted)
+        }
+
         if let currentValue = reading?.currentValue, !currentValue.isEmpty {
             return currentValue
         }
@@ -533,8 +572,40 @@ struct WidgetTrackerItem: Identifiable {
         }
     }
 
+    /// Numeric reading after applying `tracker.valueTransform`. Used by both
+    /// the display layer (so the big-number text reflects the transform) and
+    /// the gradient layer (so the color interpolation is consistent with
+    /// what the user is reading). `currentNumeric` stays raw on disk; the
+    /// transform is presentation-only.
     var numeric: Double? {
-        reading?.currentNumeric
+        guard let raw = reading?.currentNumeric else {
+            return nil
+        }
+        switch tracker.valueTransform {
+        case .none:
+            return raw
+        case .invertFromHundred:
+            return max(0.0, min(100.0, 100.0 - raw))
+        }
+    }
+
+    /// Formats an inverted numeric back into a display string. We try to
+    /// detect whether the original scraped value was percent-style — if it
+    /// contained a "%" character — and format the inverted value the same
+    /// way ("19% remaining"). Otherwise we render the bare inverted number.
+    private func formattedInvertedValue(_ inverted: Double) -> String {
+        let formatted: String
+        if inverted == inverted.rounded() {
+            formatted = String(Int(inverted))
+        } else {
+            formatted = String(format: "%.1f", inverted)
+        }
+
+        let original = reading?.currentValue ?? ""
+        if original.contains("%") {
+            return "\(formatted)% remaining"
+        }
+        return "\(formatted) remaining"
     }
 
     var sparkline: [Double] {
@@ -590,11 +661,31 @@ struct WidgetTrackerItem: Identifiable {
     /// nil when the tracker has gradient disabled, has no numeric reading,
     /// or is in snapshot mode (snapshot templates render bitmaps, not text).
     /// Templates fall back to their existing default text color when nil.
+    ///
+    /// NOTE: On macOS desktop widgets the vibrancy material desaturates
+    /// solid `Color` foregroundStyles even when
+    /// `.widgetAccentedRenderingMode(.fullColor)` is in play. Prefer
+    /// `gradientStyle` (a LinearGradient) on the big-number text so the
+    /// hue survives the vibrancy pass. This accessor remains for places
+    /// that genuinely want a solid `Color` (chip backgrounds, etc.).
     var gradientColor: Color? {
         guard tracker.renderMode == .text else {
             return nil
         }
         return GradientColor.color(numeric: numeric, mode: tracker.gradientMode)
+    }
+
+    /// LinearGradient variant for use as the `foregroundStyle` on the
+    /// big-number Text view. macOS desktop widgets desaturate solid colors
+    /// behind the vibrancy material — a LinearGradient (even a degenerate
+    /// 2-stop) stays vivid. Templates pass this to `.foregroundStyle(...)`
+    /// when present and fall back to the default `.primary` color when nil
+    /// (gradient disabled / no numeric / snapshot mode).
+    var gradientStyle: LinearGradient? {
+        guard tracker.renderMode == .text else {
+            return nil
+        }
+        return GradientColor.gradient(numeric: numeric, mode: tracker.gradientMode)
     }
 
     var snapshotImage: NSImage? {
