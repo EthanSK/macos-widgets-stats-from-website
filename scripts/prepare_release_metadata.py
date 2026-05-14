@@ -19,7 +19,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "MacosWidgetsStatsFromWebsite"
-REPO = "EthanSK/macos-widgets-stats-from-website"
+REPO = "EthanSK/stats-widget-from-website"
+DISPLAY_NAME = "Stats Widget from Website"
 INFO_PLISTS = [
     Path("MacosWidgetsStatsFromWebsite/Apps/MainApp/Info.plist"),
     Path("MacosWidgetsStatsFromWebsite/Apps/WidgetExtension/Info.plist"),
@@ -73,7 +74,7 @@ def release_values_for_ref(version: str, base_build: int) -> dict[str, str]:
     canonical_tag = f"v{version}"
     release_tag = canonical_tag
     build_number = base_build
-    release_title = f"macOS Widgets Stats from Website v{version}"
+    release_title = f"{DISPLAY_NAME} v{version}"
     release_channel = "branch"
 
     if ref_type == "tag":
@@ -89,7 +90,7 @@ def release_values_for_ref(version: str, base_build: int) -> dict[str, str]:
         release_channel = "tag"
         if match.group("build"):
             build_number = base_build * 100000 + int(match.group("build"))
-            release_title = f"macOS Widgets Stats from Website v{version} (build {match.group('build')})"
+            release_title = f"{DISPLAY_NAME} v{version} (build {match.group('build')})"
     else:
         # Producer Player-style branch releases: use the canonical version tag
         # once, then deterministic build tags once that tag exists. This keeps
@@ -98,7 +99,7 @@ def release_values_for_ref(version: str, base_build: int) -> dict[str, str]:
         if git_tag_exists(canonical_tag):
             release_tag = f"{canonical_tag}-build.{run_number}"
             build_number = base_build * 100000 + run_number
-            release_title = f"macOS Widgets Stats from Website v{version} (build {run_number})"
+            release_title = f"{DISPLAY_NAME} v{version} (build {run_number})"
 
     zip_filename = f"{APP_NAME}-{release_tag}.zip"
     latest_zip_filename = f"{APP_NAME}-latest.zip"

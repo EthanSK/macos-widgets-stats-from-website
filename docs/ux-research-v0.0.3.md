@@ -1,4 +1,4 @@
-# macOS Widgets Stats from Website — UX & WidgetKit Research
+# Stats Widget from Website — UX & WidgetKit Research
 
 > Research scope: Apple WidgetKit best practices, third-party widget-app survey, and a recommended catalog of 8–15 built-in widget templates for `EthanSK/macos-widgets-stats-from-website`. Produced 2026-04-28. Research only — no code changes.
 
@@ -247,7 +247,7 @@ Apple's standard widget configuration model is **right-click → Edit Widget** w
 But the gallery of templates is too rich for a one-line "pick a widget" picker. Recommended:
 
 **Surface 1 — Built-in template gallery in the main app's Preferences.**
-1. User opens **macOS Widgets Stats from Website.app → Widgets** tab.
+1. User opens **Stats Widget from Website.app → Widgets** tab.
 2. Gallery shows the 12 templates above as visual cards (use real screenshots / live previews where possible). Filter chips: `Small / Medium / Large / XL`, `Text / Snapshot / Mixed`, `1 tracker / 2–3 / 4+`.
 3. Clicking a card opens a config detail: "This template needs N trackers. Map them:" with dropdowns populated from the user's existing tracker library.
 4. **Save** writes the composition to `metrics.json` under a `widgetCompositions` key (template id + tracker bindings + per-tracker accent overrides).

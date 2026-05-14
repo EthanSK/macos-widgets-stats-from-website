@@ -15,13 +15,20 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-REPO = "EthanSK/macos-widgets-stats-from-website"
-SITE_URL = "https://ethansk.github.io/macos-widgets-stats-from-website/"
-APP_NAME = "macOS Widgets Stats from Website"
+REPO = "EthanSK/stats-widget-from-website"
+SITE_URL = "https://ethansk.github.io/stats-widget-from-website/"
+APP_NAME = "Stats Widget from Website"
 APP_BUNDLE_NAME = "MacosWidgetsStatsFromWebsite"
 LATEST_ZIP = "MacosWidgetsStatsFromWebsite-latest.zip"
 LATEST_ZIP_URL = f"https://github.com/{REPO}/releases/latest/download/{LATEST_ZIP}"
+# Stale tokens — if any of these strings appear in release-facing files
+# the rename hasn't fully propagated. Note: the OLD bundle/app-group ID
+# (com.ethansk.macos-widgets-stats-from-website) intentionally stays — it
+# is an internal product-stability identifier, NOT a GitHub repo slug.
 OLD_TOKENS = [
+    "EthanSK/macos-widgets-stats-from-website",
+    "ethansk.github.io/macos-widgets-stats-from-website",
+    "macOS Widgets Stats from Website",
     "macos-" + "stats-widget",
     "Macos" + "StatsWidget",
     "macOS " + "Stats Widget",
@@ -211,7 +218,7 @@ def check_site(site_dir: Path) -> None:
         fail("robots.txt does not point at the renamed sitemap URL")
 
     not_found = read_text(site_dir / "404.html")
-    if "/macos-widgets-stats-from-website/styles.css" not in not_found:
+    if "/stats-widget-from-website/styles.css" not in not_found:
         fail("404.html stylesheet path is not renamed")
 
 

@@ -1,4 +1,4 @@
-# macOS Widgets Stats from Website — Plan
+# Stats Widget from Website — Plan
 
 > Living design document. **Current implementation state: v0.12.4.** The app now
 > uses a persistent Chrome/Chromium profile controlled through CDP for setup,
@@ -259,7 +259,7 @@ needs more than one line to describe, it's doing too much and we split it.
 
 ## 5. Configuration schema
 
-Stored at `~/Library/Application Support/macOS Widgets Stats from Website/trackers.json`
+Stored at `~/Library/Application Support/Stats Widget from Website/trackers.json`
 (the **canonical config** — the App Group container holds a *copy* the
 widget reads, written atomically by the main app):
 
@@ -772,7 +772,7 @@ it is placed, and edits happen in the app.
 When no trackers exist, every widget renders an empty state:
 
 ```
-   "macOS Widgets Stats from Website"
+   "Stats Widget from Website"
    "No trackers configured"
    [Open App ➜]
 ```
@@ -1187,7 +1187,7 @@ Future tools (post-v1, listed for visibility): `pause_tracker`,
 - All scrape URLs are validated as `https://` only (or `http://localhost`
   for testing). No `file://`, no `javascript:`.
 - The MCP server writes a local diagnostic log to
-  `~/Library/Logs/macOS Widgets Stats from Website/mcp.log` with timestamp, tool name,
+  `~/Library/Logs/Stats Widget from Website/mcp.log` with timestamp, tool name,
   and argument-key fingerprint (no sensitive values). Logging is for support and
   troubleshooting; there is no in-app audit-log UI.
 - Per-tool rate limits on top of the destructive-op cap above; full table
@@ -1200,7 +1200,7 @@ This is documentation, not code, and lives in the README and project site —
 
 ```
 # local MCP client (~/.claude/skills/your-name-here/SKILL.md)
-This MCP server is at /Applications/macOS Widgets Stats from Website.app/Contents/MacOS/MacosWidgetsStatsFromWebsite --mcp-stdio
+This MCP server is at /Applications/Stats Widget from Website.app/Contents/MacOS/MacosWidgetsStatsFromWebsite --mcp-stdio
 Socket path/token: see Preferences → MCP in the running app
 
 # Codex CLI (~/.codex/AGENTS.md or whatever the user uses)
@@ -1256,7 +1256,7 @@ to commit to `trackers.json`.
 │                                                                 │
 │  How to add it:                                                 │
 │   1. Right-click the desktop ➜ Edit Widgets                     │
-│   2. Search "macOS Widgets Stats from Website"                  │
+│   2. Search "Stats Widget from Website"                  │
 │   3. Drag the matching size onto your desktop                   │
 │   4. Widget uses the app's saved configuration automatically    │
 │                                                                 │

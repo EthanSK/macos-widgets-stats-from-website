@@ -1,4 +1,4 @@
-# AGENTS.md — macos-widgets-stats-from-website
+# AGENTS.md — stats-widget-from-website
 
 Conventions for any AI agent (Claude Code, OpenClaw, Codex, etc.) working in
 this repo. Project-level rules take precedence over global CLAUDE.md.

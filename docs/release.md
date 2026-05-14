@@ -25,13 +25,13 @@ Each release attaches:
 The stable user-facing URL is:
 
 ```text
-https://github.com/EthanSK/macos-widgets-stats-from-website/releases/latest/download/MacosWidgetsStatsFromWebsite-latest.zip
+https://github.com/EthanSK/stats-widget-from-website/releases/latest/download/MacosWidgetsStatsFromWebsite-latest.zip
 ```
 
 Sparkle appcast URL:
 
 ```text
-https://ethansk.github.io/macos-widgets-stats-from-website/appcast.xml
+https://ethansk.github.io/stats-widget-from-website/appcast.xml
 ```
 
 ## Required GitHub Actions secrets

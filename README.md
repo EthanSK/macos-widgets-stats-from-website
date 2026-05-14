@@ -1,13 +1,13 @@
-# macOS Widgets Stats from Website
+# Stats Widget from Website
 
 **See any number on any logged-in webpage at a glance — without opening another tab.**
 
 [![Status](https://img.shields.io/badge/status-v0.12.4-orange.svg)](PLAN.md)
-[![Release](https://github.com/EthanSK/macos-widgets-stats-from-website/actions/workflows/release.yml/badge.svg)](https://github.com/EthanSK/macos-widgets-stats-from-website/actions/workflows/release.yml)
+[![Release](https://github.com/EthanSK/stats-widget-from-website/actions/workflows/release.yml/badge.svg)](https://github.com/EthanSK/stats-widget-from-website/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS%2013%2B-blue.svg)](#)
-[![Website](https://img.shields.io/badge/website-ethansk.github.io-7eecaf.svg)](https://ethansk.github.io/macos-widgets-stats-from-website/)
-[![Latest release](https://img.shields.io/github/v/release/EthanSK/macos-widgets-stats-from-website?include_prereleases&sort=semver&label=release&color=ffe27a)](https://github.com/EthanSK/macos-widgets-stats-from-website/releases)
+[![Website](https://img.shields.io/badge/website-ethansk.github.io-7eecaf.svg)](https://ethansk.github.io/stats-widget-from-website/)
+[![Latest release](https://img.shields.io/github/v/release/EthanSK/stats-widget-from-website?include_prereleases&sort=semver&label=release&color=ffe27a)](https://github.com/EthanSK/stats-widget-from-website/releases)
 
 A native macOS WidgetKit app that surfaces scraped values from any web page you
 log into — analytics dashboards, billing pages, storefront stats, your AWS bill,
@@ -15,7 +15,7 @@ your bank balance, anything that has a number or visual region on a page.
 Configure it once with a click-to-pick element flow, and the widget keeps
 refreshing in the background.
 
-[Website](https://ethansk.github.io/macos-widgets-stats-from-website/) · [Direct download](https://github.com/EthanSK/macos-widgets-stats-from-website/releases/latest/download/MacosWidgetsStatsFromWebsite-latest.zip) · [Architecture (PLAN.md)](PLAN.md) · [Issues](https://github.com/EthanSK/macos-widgets-stats-from-website/issues) · [Releases](https://github.com/EthanSK/macos-widgets-stats-from-website/releases)
+[Website](https://ethansk.github.io/stats-widget-from-website/) · [Direct download](https://github.com/EthanSK/stats-widget-from-website/releases/latest/download/MacosWidgetsStatsFromWebsite-latest.zip) · [Architecture (PLAN.md)](PLAN.md) · [Issues](https://github.com/EthanSK/stats-widget-from-website/issues) · [Releases](https://github.com/EthanSK/stats-widget-from-website/releases)
 
 > **Status:** v0.12.4 implements the local app, widget extension, CLI, scraping,
 > snapshot rendering, widget template catalog, selector packs, MCP server,
@@ -64,12 +64,12 @@ need a real provisioning profile) are unaffected.
 
 ## Updates
 
-macOS Widgets Stats from Website uses Sparkle for automatic updates. Signed releases publish a
+Stats Widget from Website uses Sparkle for automatic updates. Signed releases publish a
 Sparkle appcast at
-`https://ethansk.github.io/macos-widgets-stats-from-website/appcast.xml`; installed apps check
+`https://ethansk.github.io/stats-widget-from-website/appcast.xml`; installed apps check
 that feed daily and can also check on demand from **Check for Updates...** in
 the app menu. GitHub Releases also keep a stable latest-download alias at
-`https://github.com/EthanSK/macos-widgets-stats-from-website/releases/latest/download/MacosWidgetsStatsFromWebsite-latest.zip`.
+`https://github.com/EthanSK/stats-widget-from-website/releases/latest/download/MacosWidgetsStatsFromWebsite-latest.zip`.
 See [docs/release.md](docs/release.md) for release setup and validation gates.
 
 ## Features
@@ -93,7 +93,7 @@ See [docs/release.md](docs/release.md) for release setup and validation gates.
 ## Configuration
 
 The widget reads a JSON config from
-`~/Library/Application Support/macOS Widgets Stats from Website/trackers.json`. Each tracker
+`~/Library/Application Support/Stats Widget from Website/trackers.json`. Each tracker
 has a target URL, a CSS selector or element bounding rect, a refresh interval,
 and a render mode (Text or Snapshot). Widget configurations live in the same
 file as named instances with a size, template, and tracker list. See
@@ -102,7 +102,7 @@ shape and migration strategy.
 
 ## Setup walkthrough
 
-1. Open **macOS Widgets Stats from Website.app**.
+1. Open **Stats Widget from Website.app**.
 2. On first launch, paste any page URL and click **Continue**, or skip the
    wizard and open Preferences directly.
 3. Pick **Text** or **Snapshot** mode and choose the first widget template.
@@ -112,9 +112,9 @@ shape and migration strategy.
 5. Click **Save Tracker** to create the tracker and its first widget
    configuration.
 6. Add the widget from macOS: right-click the desktop or Notification Centre,
-   choose **Edit Widgets**, search for **macOS Widgets Stats from Website**,
+   choose **Edit Widgets**, search for **Stats Widget from Website**,
    and drag the widget onto the desktop. Then click/right-click the placed
-   widget, choose **Edit “macOS Widgets Stats from Website”**, and pick the
+   widget, choose **Edit “Stats Widget from Website”**, and pick the
    saved configuration to show. Desktop widgets require macOS 14 or later.
 
 Open **Preferences → Widgets** later to create, duplicate, edit, or rename widget
@@ -147,7 +147,7 @@ Minimal stdio MCP config shape:
 {
   "mcpServers": {
     "macos-widgets-stats-from-website": {
-      "command": "/Applications/macOS Widgets Stats from Website.app/Contents/MacOS/MacosWidgetsStatsFromWebsite",
+      "command": "/Applications/Stats Widget from Website.app/Contents/MacOS/MacosWidgetsStatsFromWebsite",
       "args": ["--mcp-stdio"]
     }
   }
@@ -189,11 +189,11 @@ Useful setup flow for an assistant:
 ## Contributing
 
 Issues and PRs welcome at
-[github.com/EthanSK/macos-widgets-stats-from-website](https://github.com/EthanSK/macos-widgets-stats-from-website).
+[github.com/EthanSK/stats-widget-from-website](https://github.com/EthanSK/stats-widget-from-website).
 Read [PLAN.md](PLAN.md) before opening a structural PR — that's the detailed
 architecture document and the place where intent gets argued out before code
 gets written. Bug reports and template suggestions can go straight to
-[Issues](https://github.com/EthanSK/macos-widgets-stats-from-website/issues).
+[Issues](https://github.com/EthanSK/stats-widget-from-website/issues).
 
 ## Maintainer Notes
 

@@ -1,7 +1,20 @@
 name: Release
+run-name: >-
+  ${{ (github.event.head_commit
+      && startsWith(github.event.head_commit.message, 'chore(version)')
+      && github.event.commits[0].message != github.event.head_commit.message
+      && github.event.commits[0].message)
+      || (github.event.head_commit && github.event.head_commit.message)
+      || '' }}
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -71,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           CERT_PATH="$RUNNER_TEMP/developer-id.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/macos-widgets-stats-from-website-signing.keychain-db"
+          KEYCHAIN_PATH="$RUNNER_TEMP/stats-widget-from-website-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
 
           printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
@@ -214,7 +227,7 @@ jobs:
             echo "- Versioned ZIP: \`$VERSIONED_ZIP_URL\`"
             echo ""
             echo "Existing installs update automatically via Sparkle from:"
-            echo "\`https://ethansk.github.io/macos-widgets-stats-from-website/appcast.xml\`"
+            echo "\`https://ethansk.github.io/stats-widget-from-website/appcast.xml\`"
             echo ""
             echo "Workflow run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo ""
@@ -259,6 +272,33 @@ jobs:
           RELEASE_NOTES_URL="$RELEASE_NOTES_URL" \
             python3 scripts/update_appcast.py
 
+          # Refresh version.json (consumed by the landing page's dynamic
+          # version badge). Keep the schema in sync with site/version.json
+          # on gh-pages — index.html's loader expects { version, channel,
+          # release_url, appcast_url, download_url } keys.
+          VERSION_JSON_VERSION="$RELEASE_VERSION" \
+          VERSION_JSON_REPO="$REPO" \
+          VERSION_JSON_LATEST_ZIP="$LATEST_ZIP_FILENAME" \
+          VERSION_JSON_GH_PAGES_DIR="$GH_PAGES_DIR" \
+            python3 - <<'PY'
+import json, os, datetime
+repo = os.environ["VERSION_JSON_REPO"]
+slug = repo.split("/", 1)[1]
+data = {
+    "version": os.environ["VERSION_JSON_VERSION"],
+    "channel": "stable",
+    "updated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "release_url": f"https://github.com/{repo}/releases/latest",
+    "appcast_url": f"https://ethansk.github.io/{slug}/appcast.xml",
+    "download_url": f"https://github.com/{repo}/releases/latest/download/{os.environ['VERSION_JSON_LATEST_ZIP']}",
+}
+out = os.path.join(os.environ["VERSION_JSON_GH_PAGES_DIR"], "version.json")
+with open(out, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+print("wrote", out, data)
+PY
+
           python3 scripts/validate_release_metadata.py \
             --site-dir "$GH_PAGES_DIR" \
             --check-site \
@@ -266,21 +306,21 @@ jobs:
             --require-appcast-item
 
           echo "GH_PAGES_DIR=$GH_PAGES_DIR" >> "$GITHUB_ENV"
-          git -C "$GH_PAGES_DIR" diff -- appcast.xml
+          git -C "$GH_PAGES_DIR" diff -- appcast.xml version.json
 
-      - name: Commit appcast to gh-pages
+      - name: Commit appcast + version.json to gh-pages
         run: |
           set -euo pipefail
           git -C "$GH_PAGES_DIR" config user.name "github-actions[bot]"
           git -C "$GH_PAGES_DIR" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C "$GH_PAGES_DIR" add appcast.xml
+          git -C "$GH_PAGES_DIR" add appcast.xml version.json
 
           if git -C "$GH_PAGES_DIR" diff --cached --quiet; then
-            echo "No appcast changes to commit"
+            echo "No appcast/version changes to commit"
             exit 0
           fi
 
-          git -C "$GH_PAGES_DIR" commit -m "chore: update appcast for ${RELEASE_TAG}"
+          git -C "$GH_PAGES_DIR" commit -m "chore: update appcast + version.json for ${RELEASE_TAG}"
           git -C "$GH_PAGES_DIR" push origin HEAD:gh-pages
 
       - name: Clean up keychain

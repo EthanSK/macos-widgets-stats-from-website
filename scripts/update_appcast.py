@@ -13,9 +13,9 @@ import xml.etree.ElementTree as ET
 SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 ATOM_NS = "http://www.w3.org/2005/Atom"
 SPARKLE = f"{{{SPARKLE_NS}}}"
-REPO_DEFAULT = "EthanSK/macos-widgets-stats-from-website"
-SITE_URL = "https://ethansk.github.io/macos-widgets-stats-from-website/"
-APP_NAME = "macOS Widgets Stats from Website"
+REPO_DEFAULT = "EthanSK/stats-widget-from-website"
+SITE_URL = "https://ethansk.github.io/stats-widget-from-website/"
+APP_NAME = "Stats Widget from Website"
 PLACEHOLDER_SIGNATURE_TOKENS = ("PLACEHOLDER", "CHANGEME", "TODO", "TBD", "DUMMY")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 BASE64_RE = re.compile(r"^[A-Za-z0-9+/=]+$")
@@ -50,9 +50,13 @@ def validate_release_inputs(
 ) -> None:
     if repo != REPO_DEFAULT:
         die(f"REPO must be {REPO_DEFAULT}, got {repo!r}")
-    old_slug = "macos-" + "stats-widget"
-    if old_slug in repo or old_slug in release_notes_url:
-        die("old repository slug is not allowed in appcast metadata")
+    old_slugs = [
+        "macos-" + "stats-widget",
+        "macos-widgets-stats-from-website",
+    ]
+    for old_slug in old_slugs:
+        if old_slug in repo or old_slug in release_notes_url:
+            die(f"old repository slug {old_slug!r} is not allowed in appcast metadata")
     if not SEMVER_RE.match(version):
         die(f"VERSION must be x.y.z, got {version!r}")
     if display_version != version:

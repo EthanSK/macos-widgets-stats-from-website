@@ -23,8 +23,8 @@ settings:
     # from Bundle.main.infoDictionary at runtime, so nothing else needs touching.
     # Enforced by .githooks/pre-commit (see core.hooksPath in repo config) and
     # by scripts/validate_release_metadata.py.
-    MARKETING_VERSION: "0.17.13"
-    CURRENT_PROJECT_VERSION: "1241"
+    MARKETING_VERSION: "0.17.14"
+    CURRENT_PROJECT_VERSION: "1242"
 
 packages:
   Sparkle:
@@ -108,7 +108,7 @@ targets:
       path: MacosWidgetsStatsFromWebsite/Apps/MainApp/Info.plist
       properties:
         CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
-        CFBundleDisplayName: macOS Widgets Stats from Website
+        CFBundleDisplayName: Stats Widget from Website
         CFBundleExecutable: $(EXECUTABLE_NAME)
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleInfoDictionaryVersion: "6.0"
@@ -117,7 +117,7 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleDocumentTypes:
-          - CFBundleTypeName: macOS Widgets Stats from Website Selector Pack
+          - CFBundleTypeName: Stats Widget from Website Selector Pack
             CFBundleTypeRole: Editor
             LSHandlerRank: Owner
             LSItemContentTypes:
@@ -130,12 +130,12 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSPrincipalClass: NSApplication
         SUEnableAutomaticChecks: true
-        SUFeedURL: https://ethansk.github.io/macos-widgets-stats-from-website/appcast.xml
+        SUFeedURL: https://ethansk.github.io/stats-widget-from-website/appcast.xml
         SUPublicEDKey: 9PG32PH1UFbECc644qjE4OQtpiILuiPCOUuXvgND2tA=
         SUScheduledCheckInterval: 86400
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.ethansk.macos-widgets-stats-from-website.selectorpack
-            UTTypeDescription: macOS Widgets Stats from Website Selector Pack
+            UTTypeDescription: Stats Widget from Website Selector Pack
             UTTypeConformsTo:
               - public.json
             UTTypeTagSpecification:
@@ -179,7 +179,7 @@ targets:
       path: MacosWidgetsStatsFromWebsite/Apps/WidgetExtension/Info.plist
       properties:
         CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
-        CFBundleDisplayName: macOS Widgets Stats from Website Widget
+        CFBundleDisplayName: Stats Widget from Website Widget
         CFBundleExecutable: $(EXECUTABLE_NAME)
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleInfoDictionaryVersion: "6.0"
