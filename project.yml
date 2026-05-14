@@ -23,8 +23,8 @@ settings:
     # from Bundle.main.infoDictionary at runtime, so nothing else needs touching.
     # Enforced by .githooks/pre-commit (see core.hooksPath in repo config) and
     # by scripts/validate_release_metadata.py.
-    MARKETING_VERSION: "0.17.15"
-    CURRENT_PROJECT_VERSION: "1243"
+    MARKETING_VERSION: "0.18.0"
+    CURRENT_PROJECT_VERSION: "1250"
 
 packages:
   Sparkle:
@@ -43,6 +43,15 @@ targets:
           enabled: 1
     sources:
       - path: MacosWidgetsStatsFromWebsite/Apps/MainApp
+        excludes:
+          - Resources
+      # Auto-repair hook script + future bundled helpers. Added as a
+      # folder reference so the inner Scripts/ directory shape is
+      # preserved at Contents/Resources/Scripts/auto-repair-tracker.sh
+      # (HookScriptPaths.swift relies on that exact layout).
+      - path: MacosWidgetsStatsFromWebsite/Apps/MainApp/Resources/Scripts
+        buildPhase: resources
+        type: folder
       - path: MacosWidgetsStatsFromWebsite/Shared
     dependencies:
       - target: MacosWidgetsStatsFromWebsiteWidget
@@ -167,6 +176,7 @@ targets:
           - Scraping
           - SelectorPacks
           - SignIn
+          - Hooks
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-widgets-stats-from-website.widget
@@ -248,6 +258,41 @@ targets:
         keychain-access-groups:
           - T34G959ZG8.com.ethansk.macos-widgets-stats-from-website
 
+  # Hook-system unit tests (v0.18.0+). Lightweight XCTest target — pulls
+  # in only the Shared/ sources it needs (Models + AppGroup + Hooks),
+  # not the MainApp's SwiftUI surface, so the tests stay fast and have
+  # no UI side effects. The test launcher replaces the production
+  # HookProcessLauncher with a fake so the suite never opens Terminal
+  # windows or shells out to claude.
+  MacosWidgetsStatsFromWebsiteHookTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "13.0"
+    productName: MacosWidgetsStatsFromWebsiteHookTests
+    sources:
+      - path: MacosWidgetsStatsFromWebsiteTests
+      - path: MacosWidgetsStatsFromWebsite/Shared
+        excludes:
+          - MCP
+          - Scraping
+          - SelectorPacks
+          - SignIn
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ethansk.macos-widgets-stats-from-website.hook-tests
+        INFOPLIST_FILE: MacosWidgetsStatsFromWebsiteTests/Info.plist
+        # Hook tests run on a temp-dir App Group container override so
+        # they don't read or write the user's real config. AppGroupStore
+        # honours MACOS_WIDGETS_STATS_TEST_CONTAINER via AppGroupPaths.
+        CODE_SIGN_STYLE: Automatic
+        # Tests build the same Shared/ code the app uses, so they need
+        # the AppGroup entitlement to even compile cleanly (otherwise
+        # Bundle.main paths resolve oddly). Sandbox stays off so the
+        # spawned hook processes in the integration test can actually
+        # exec /bin/bash.
+        CODE_SIGN_ENTITLEMENTS: MacosWidgetsStatsFromWebsiteTests/Tests.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+
 schemes:
   MacosWidgetsStatsFromWebsite:
     build:
@@ -275,3 +320,12 @@ schemes:
       config: Debug
     archive:
       config: Release
+
+  MacosWidgetsStatsFromWebsiteHookTests:
+    build:
+      targets:
+        MacosWidgetsStatsFromWebsiteHookTests: all
+    test:
+      config: Debug
+      targets:
+        - MacosWidgetsStatsFromWebsiteHookTests

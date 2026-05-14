@@ -84,6 +84,13 @@ struct Tracker: Codable, Identifiable {
     var valueParser: ValueParser
     var history: TrackerHistory
     var hideElements: [String]
+    /// Per-tracker scrape lifecycle hooks (0.18.0+). New trackers get the
+    /// default scaffold from `TrackerHooks.defaultScaffold()` (one built-in
+    /// auto-repair failure hook). Pre-0.18 trackers.json files decode with
+    /// an empty hooks bag and miss the default scaffold — see
+    /// `applyMissingDefaultHookScaffold(_:)` in AppGroupStore for the
+    /// migration that backfills it.
+    var hooks: TrackerHooks
 
     init(
         id: UUID = UUID(),
@@ -101,7 +108,8 @@ struct Tracker: Codable, Identifiable {
         valueTransform: ValueTransform = Tracker.defaultValueTransform,
         valueParser: ValueParser = ValueParser(),
         history: TrackerHistory = TrackerHistory(),
-        hideElements: [String] = []
+        hideElements: [String] = [],
+        hooks: TrackerHooks? = nil
     ) {
         self.id = id
         self.name = name
@@ -119,6 +127,7 @@ struct Tracker: Codable, Identifiable {
         self.valueParser = valueParser
         self.history = history
         self.hideElements = hideElements
+        self.hooks = hooks ?? TrackerHooks.defaultScaffold()
     }
 
     init(from decoder: Decoder) throws {
@@ -150,6 +159,11 @@ struct Tracker: Codable, Identifiable {
         valueParser = try container.decodeIfPresent(ValueParser.self, forKey: .valueParser) ?? ValueParser()
         history = try container.decodeIfPresent(TrackerHistory.self, forKey: .history) ?? TrackerHistory()
         hideElements = try container.decodeIfPresent([String].self, forKey: .hideElements) ?? []
+        // hooks was added in 0.18.0. Pre-0.18 trackers decode an empty bag here;
+        // the BackgroundScheduler-side migration backfills the auto-repair
+        // scaffold for existing trackers on first load (so users get the
+        // self-heal benefit without opting in).
+        hooks = try container.decodeIfPresent(TrackerHooks.self, forKey: .hooks) ?? TrackerHooks()
     }
 }
 

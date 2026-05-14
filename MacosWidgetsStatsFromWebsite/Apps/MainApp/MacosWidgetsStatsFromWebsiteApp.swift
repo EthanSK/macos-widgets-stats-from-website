@@ -41,6 +41,16 @@ struct MacosWidgetsStatsFromWebsiteApp: App {
         // Must run before AppGroupStore() reads/writes the new container.
         AppGroupStore.migrateLegacyAppGroupContainerIfNeeded()
 
+        // Backfill the default failure-hook scaffold on pre-0.18 trackers.
+        // Idempotent — only adds hooks to trackers whose hooks bag is
+        // currently empty, so user-disabled hooks (enabled=false) and
+        // user-edited hooks are not overwritten.
+        do {
+            _ = try AppGroupStore.backfillDefaultHookScaffoldIfNeeded()
+        } catch {
+            ActivityLogger.log("app", "hook scaffold backfill failed", metadata: ["error": error.localizedDescription])
+        }
+
         let store = AppGroupStore()
         _store = StateObject(wrappedValue: store)
         _backgroundScheduler = StateObject(wrappedValue: BackgroundScheduler(store: store))

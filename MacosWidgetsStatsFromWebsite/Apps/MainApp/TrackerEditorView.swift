@@ -193,6 +193,16 @@ struct TrackerEditorView: View {
                 } header: {
                     Text("Capture")
                 }
+
+                Section {
+                    hooksPanel
+                } header: {
+                    Text("Hooks")
+                } footer: {
+                    Text("Hooks fire after every scrape. New trackers get the built-in auto-repair failure hook by default — it spawns Claude Code in a new Terminal window when a scrape fails so the agent can re-identify the broken element. Disable it per tracker if you'd rather repair manually.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .formStyle(.grouped)
 
@@ -540,6 +550,159 @@ struct TrackerEditorView: View {
         draft.selector = pick.selector
         draft.elementBoundingBox = pick.bbox
         capturedText = pick.text
+    }
+
+    // MARK: - Hooks panel (v0.18.0+)
+
+    @ViewBuilder
+    private var hooksPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            hookGroup(title: "On failure", trigger: .onFailure, hooks: $draft.hooks.onFailure)
+            Divider()
+            hookGroup(title: "On success", trigger: .onSuccess, hooks: $draft.hooks.onSuccess)
+        }
+    }
+
+    @ViewBuilder
+    private func hookGroup(title: String, trigger: HookTrigger, hooks: Binding<[TrackerHook]>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button {
+                    let new = TrackerHook(
+                        name: "New \(title.lowercased()) hook",
+                        trigger: trigger,
+                        actionKind: .runShellCommand,
+                        actionPayload: ""
+                    )
+                    hooks.wrappedValue.append(new)
+                } label: {
+                    Label("Add hook", systemImage: "plus.circle")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if hooks.wrappedValue.isEmpty {
+                Text("No \(title.lowercased()) hooks configured.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(hooks.wrappedValue) { hook in
+                    hookRow(hook: hook, hooks: hooks)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func hookRow(hook: TrackerHook, hooks: Binding<[TrackerHook]>) -> some View {
+        let bindingIndex = hooks.wrappedValue.firstIndex(where: { $0.id == hook.id })
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                if let idx = bindingIndex {
+                    Toggle("", isOn: Binding(
+                        get: { hooks.wrappedValue[idx].enabled },
+                        set: { hooks.wrappedValue[idx].enabled = $0 }
+                    ))
+                    .labelsHidden()
+                }
+                if let idx = bindingIndex {
+                    TextField("Name", text: Binding(
+                        get: { hooks.wrappedValue[idx].name },
+                        set: { hooks.wrappedValue[idx].name = $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                }
+                if hook.builtInIdentifier != nil {
+                    Text("built-in")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.15))
+                        .cornerRadius(4)
+                }
+                Spacer()
+                Button(role: .destructive) {
+                    hooks.wrappedValue.removeAll { $0.id == hook.id }
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if let idx = bindingIndex {
+                HStack(spacing: 8) {
+                    Picker("Action", selection: Binding(
+                        get: { hooks.wrappedValue[idx].actionKind },
+                        set: { hooks.wrappedValue[idx].actionKind = $0 }
+                    )) {
+                        Text("Shell").tag(HookActionKind.runShellCommand)
+                        Text("AppleScript").tag(HookActionKind.runAppleScript)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 200)
+                    Spacer()
+                }
+
+                TextField("Command…", text: Binding(
+                    get: { hooks.wrappedValue[idx].actionPayload },
+                    set: { hooks.wrappedValue[idx].actionPayload = $0 }
+                ), axis: .vertical)
+                    .font(.system(.caption, design: .monospaced))
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(2...6)
+            }
+
+            if let lastRun = hook.lastRun {
+                hookLastRunChip(lastRun)
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.06))
+        .cornerRadius(6)
+    }
+
+    private func hookLastRunChip(_ lastRun: HookLastRun) -> some View {
+        let symbol = hookLastRunSymbol(lastRun.status)
+        let color = hookLastRunColor(lastRun.status)
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        let timestamp = lastRun.finishedAt ?? lastRun.startedAt
+
+        return HStack(spacing: 6) {
+            Image(systemName: symbol)
+                .foregroundStyle(color)
+            Text("last run \(formatter.localizedString(for: timestamp, relativeTo: Date()))")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let detail = lastRun.detail, !detail.isEmpty {
+                Text("— \(detail)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private func hookLastRunSymbol(_ status: HookLastRun.Status) -> String {
+        switch status {
+        case .ok: return "checkmark.circle.fill"
+        case .error: return "xmark.octagon.fill"
+        case .timeout: return "clock.badge.exclamationmark.fill"
+        case .skipped: return "minus.circle"
+        }
+    }
+
+    private func hookLastRunColor(_ status: HookLastRun.Status) -> Color {
+        switch status {
+        case .ok: return .green
+        case .error: return .red
+        case .timeout: return .orange
+        case .skipped: return .gray
+        }
     }
 
     private func formattedBoundingBox(_ bbox: ElementBoundingBox) -> String {

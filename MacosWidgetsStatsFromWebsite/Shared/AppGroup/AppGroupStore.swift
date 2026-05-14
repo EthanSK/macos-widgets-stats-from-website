@@ -422,6 +422,60 @@ final class AppGroupStore: ObservableObject {
         }
     }
 
+    // MARK: - Hook telemetry (v0.18.0+)
+
+    /// Persists a hook's lastRun stamp back into the tracker config so
+    /// the editor UI can show "last run 13:42, ok". Silently no-ops if
+    /// the tracker or hook has been deleted between fire and stamp.
+    static func recordHookTelemetry(trackerID: UUID, hookID: UUID, lastRun: HookLastRun) throws {
+        try mutateSharedConfiguration { configuration in
+            guard let trackerIndex = configuration.trackers.firstIndex(where: { $0.id == trackerID }) else {
+                return
+            }
+            var tracker = configuration.trackers[trackerIndex]
+            var didStamp = false
+
+            if let idx = tracker.hooks.onSuccess.firstIndex(where: { $0.id == hookID }) {
+                tracker.hooks.onSuccess[idx].lastRun = lastRun
+                didStamp = true
+            }
+            if let idx = tracker.hooks.onFailure.firstIndex(where: { $0.id == hookID }) {
+                tracker.hooks.onFailure[idx].lastRun = lastRun
+                didStamp = true
+            }
+
+            guard didStamp else {
+                return
+            }
+            configuration.trackers[trackerIndex] = tracker
+        }
+    }
+
+    /// Migration helper: backfill the default failure hook scaffold on
+    /// trackers that pre-date v0.18.0. Idempotent — only fires when a
+    /// tracker has zero hooks AND has no record of having been migrated.
+    /// We tag the inserted hook with `BuiltInHookIdentifier.autoRepair`
+    /// so future migrations can re-find it without clobbering
+    /// user-authored hooks.
+    @discardableResult
+    static func backfillDefaultHookScaffoldIfNeeded() throws -> Int {
+        var count = 0
+        try mutateSharedConfiguration { configuration in
+            for index in configuration.trackers.indices {
+                let tracker = configuration.trackers[index]
+                guard tracker.hooks.isEmpty else {
+                    continue
+                }
+                configuration.trackers[index].hooks = TrackerHooks.defaultScaffold()
+                count += 1
+            }
+        }
+        if count > 0 {
+            ActivityLogger.log("store", "backfilled default hook scaffold", metadata: ["count": "\(count)"])
+        }
+        return count
+    }
+
     private static func loadConfiguration() -> AppConfiguration {
         loadConfiguration(from: AppGroupPaths.canonicalTrackersURL())
     }

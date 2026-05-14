@@ -154,20 +154,76 @@ final class BackgroundScheduler: ObservableObject {
     private func record(result: Result<TrackerReading, Error>, for tracker: Tracker) {
         do {
             let recordedReading: TrackerReading
+            let scrapeError: Error?
             switch result {
             case .success(let reading):
                 try AppGroupStore.record(reading: reading, for: tracker)
                 recordedReading = reading
+                scrapeError = nil
             case .failure(let error):
                 recordedReading = try AppGroupStore.recordFailure(message: error.localizedDescription, for: tracker)
+                scrapeError = error
             }
             handlePostRecord(reading: recordedReading, tracker: tracker)
             DockBadgeUpdater.update()
             WidgetCenter.shared.reloadTimelines(ofKind: "MacosWidgetsStatsFromWebsite")
             postReadingDidChange(trackerID: tracker.id)
+            fireScrapeLifecycleHooks(
+                tracker: tracker,
+                reading: recordedReading,
+                scrapeError: scrapeError
+            )
         } catch {
             // The Preferences UI surfaces configuration persistence errors;
             // scrape write failures are transient and retried by the scheduler.
+        }
+    }
+
+    /// Bridges scrape outcomes into the per-tracker hook system (v0.18.0+).
+    /// Lives here (rather than inside `record`) so hook firing can run
+    /// against the *latest persisted* copy of the tracker — which may
+    /// include hook telemetry updates from a prior firing.
+    ///
+    /// Errors thrown by hooks are intentionally swallowed so a broken
+    /// user-authored hook NEVER blocks the scheduler. See HookExecutor's
+    /// fire(...) contract.
+    private func fireScrapeLifecycleHooks(
+        tracker: Tracker,
+        reading: TrackerReading,
+        scrapeError: Error?
+    ) {
+        let trigger: HookTrigger = (scrapeError == nil && reading.status == .ok) ? .onSuccess : .onFailure
+        // Re-read the tracker so we pick up any hook config updates that
+        // landed between scrape-start and now (e.g. MCP add_tracker_hook).
+        let latestTracker = AppGroupStore.loadSharedConfiguration().trackers.first { $0.id == tracker.id } ?? tracker
+        let context = HookScrapeContext(
+            trigger: trigger,
+            firedAt: Date(),
+            scrapedValue: reading.currentValue,
+            scrapedNumeric: reading.currentNumeric,
+            errorKind: scrapeError.map { "\(type(of: $0))" },
+            errorMessage: scrapeError?.localizedDescription ?? reading.lastError,
+            consecutiveFailureCount: reading.consecutiveFailureCount
+        )
+        HookExecutor.fire(
+            trigger: trigger,
+            tracker: latestTracker,
+            scrapeContext: context
+        ) { hookID, telemetry in
+            // Persist lastRun back into the tracker config.
+            do {
+                try AppGroupStore.recordHookTelemetry(
+                    trackerID: latestTracker.id,
+                    hookID: hookID,
+                    lastRun: telemetry
+                )
+            } catch {
+                ActivityLogger.log("hook", "telemetry persist failed", metadata: [
+                    "trackerID": latestTracker.id.uuidString,
+                    "hookID": hookID.uuidString,
+                    "error": error.localizedDescription
+                ])
+            }
         }
     }
 

@@ -546,7 +546,10 @@ private enum MCPToolCatalog {
         "import_selector_pack",
         "attach_webhook",
         "reset_tracker_failure_state",
-        "repair_tracker"
+        "repair_tracker",
+        "add_tracker_hook",
+        "update_tracker_hook",
+        "delete_tracker_hook"
     ]
 
     static let toolNames = Set(tools.compactMap { $0["name"] as? String })
@@ -646,7 +649,31 @@ private enum MCPToolCatalog {
             "url": stringSchema("Optional new URL"),
             "clearSnapshot": boolSchema("Clear cached snapshot before next scrape (default true)"),
             "triggerScrape": boolSchema("Trigger a scrape immediately after repair (default true)")
-        ], required: ["id"])
+        ], required: ["id"]),
+        tool("list_tracker_hooks", "List the scrape-lifecycle hooks configured on one tracker. Each hook records its trigger ('onSuccess' or 'onFailure'), action kind, payload, enabled state, and last-run telemetry.", [
+            "trackerId": stringSchema("Tracker UUID")
+        ], required: ["trackerId"]),
+        tool("add_tracker_hook", "Add a scrape-lifecycle hook to a tracker. Hooks fire after every scrape — onSuccess after a clean reading, onFailure after any scrape error. Action kinds: 'runShellCommand' (passed to /bin/bash -lc) or 'runAppleScript' (passed to /usr/bin/osascript -e). Hooks see TRACKER_ID, TRACKER_URL, TRACKER_SELECTOR, ERROR_KIND, ERROR_MESSAGE, SCRAPE_VALUE env vars.", [
+            "trackerId": stringSchema("Tracker UUID"),
+            "name": stringSchema("Hook name (free text)"),
+            "trigger": hookTriggerSchema(),
+            "actionKind": hookActionKindSchema(),
+            "actionPayload": stringSchema("Shell command or AppleScript source. The literal token ${AUTO_REPAIR_SCRIPT} is substituted with the bundled auto-repair script path at run-time."),
+            "enabled": boolSchema("Default true.")
+        ], required: ["trackerId", "name", "trigger", "actionKind", "actionPayload"]),
+        tool("update_tracker_hook", "Update an existing tracker hook. Pass trackerId + hookId; any omitted field is left alone.", [
+            "trackerId": stringSchema("Tracker UUID"),
+            "hookId": stringSchema("Hook UUID"),
+            "name": stringSchema("New name"),
+            "trigger": hookTriggerSchema(),
+            "actionKind": hookActionKindSchema(),
+            "actionPayload": stringSchema("New payload"),
+            "enabled": boolSchema("Enable/disable")
+        ], required: ["trackerId", "hookId"]),
+        tool("delete_tracker_hook", "Delete a tracker hook. Idempotent — succeeds when the hook is already gone.", [
+            "trackerId": stringSchema("Tracker UUID"),
+            "hookId": stringSchema("Hook UUID")
+        ], required: ["trackerId", "hookId"])
     ]
 
     private static func tool(
@@ -696,6 +723,22 @@ private enum MCPToolCatalog {
             "type": "string",
             "enum": GradientMode.allCases.map(\.rawValue),
             "description": "Gradient color for the big-number value text. 'highIsBad' = 0 green → 100 red. 'highIsGood' = 0 red → 100 green. 'none' = default text color (no gradient)."
+        ]
+    }
+
+    private static func hookTriggerSchema() -> [String: Any] {
+        [
+            "type": "string",
+            "enum": HookTrigger.allCases.map(\.rawValue),
+            "description": "When the hook fires. 'onSuccess' = after a clean scrape, 'onFailure' = after any scrape error."
+        ]
+    }
+
+    private static func hookActionKindSchema() -> [String: Any] {
+        [
+            "type": "string",
+            "enum": HookActionKind.allCases.map(\.rawValue),
+            "description": "How to run the hook. 'runShellCommand' passes actionPayload to /bin/bash -lc. 'runAppleScript' passes it to /usr/bin/osascript -e."
         ]
     }
 
@@ -768,6 +811,14 @@ private enum MCPToolDispatcher {
             return try getWidgetDiagnostics(arguments)
         case "repair_tracker":
             return try repairTracker(arguments)
+        case "list_tracker_hooks":
+            return try listTrackerHooks(arguments)
+        case "add_tracker_hook":
+            return try addTrackerHook(arguments)
+        case "update_tracker_hook":
+            return try updateTrackerHook(arguments)
+        case "delete_tracker_hook":
+            return try deleteTrackerHook(arguments)
         default:
             throw MCPError.toolNotFound(name)
         }
@@ -1392,6 +1443,199 @@ private enum MCPToolDispatcher {
         return payload
     }
 
+    // MARK: - Tracker hook tools (v0.18.0+)
+
+    private static func listTrackerHooks(_ arguments: [String: Any]) throws -> Any {
+        let trackerID = try uuidArgument("trackerId", arguments)
+        let configuration = AppGroupStore.loadSharedConfiguration()
+        guard let tracker = configuration.trackers.first(where: { $0.id == trackerID }) else {
+            throw MCPError.notFound("Tracker \(trackerID.uuidString) was not found.")
+        }
+        return [
+            "trackerId": trackerID.uuidString,
+            "onSuccess": tracker.hooks.onSuccess.map(hookPayload),
+            "onFailure": tracker.hooks.onFailure.map(hookPayload)
+        ]
+    }
+
+    private static func addTrackerHook(_ arguments: [String: Any]) throws -> Any {
+        let trackerID = try uuidArgument("trackerId", arguments)
+        let name = try stringArgument("name", arguments).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            throw MCPError.validation("Hook name cannot be empty.")
+        }
+        let trigger = try hookTriggerArgument(arguments["trigger"])
+        let actionKind = try hookActionKindArgument(arguments["actionKind"])
+        let actionPayload = try stringArgument("actionPayload", arguments)
+        guard !actionPayload.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw MCPError.validation("Hook actionPayload cannot be empty.")
+        }
+        let enabled = (arguments["enabled"] as? Bool) ?? true
+
+        let hook = TrackerHook(
+            name: name,
+            trigger: trigger,
+            actionKind: actionKind,
+            actionPayload: actionPayload,
+            enabled: enabled
+        )
+
+        try AppGroupStore.mutateSharedConfiguration { configuration in
+            guard let index = configuration.trackers.firstIndex(where: { $0.id == trackerID }) else {
+                throw MCPError.notFound("Tracker \(trackerID.uuidString) was not found.")
+            }
+            switch trigger {
+            case .onSuccess:
+                configuration.trackers[index].hooks.onSuccess.append(hook)
+            case .onFailure:
+                configuration.trackers[index].hooks.onFailure.append(hook)
+            }
+        }
+        notifyConfigurationChanged()
+        return ["hookId": hook.id.uuidString, "hook": hookPayload(hook)]
+    }
+
+    private static func updateTrackerHook(_ arguments: [String: Any]) throws -> Any {
+        let trackerID = try uuidArgument("trackerId", arguments)
+        let hookID = try uuidArgument("hookId", arguments)
+
+        var updatedHook: TrackerHook?
+
+        try AppGroupStore.mutateSharedConfiguration { configuration in
+            guard let trackerIndex = configuration.trackers.firstIndex(where: { $0.id == trackerID }) else {
+                throw MCPError.notFound("Tracker \(trackerID.uuidString) was not found.")
+            }
+            var tracker = configuration.trackers[trackerIndex]
+
+            let succeeded = try updateHookInList(&tracker.hooks.onSuccess, hookID: hookID, arguments: arguments)
+                || (try updateHookInList(&tracker.hooks.onFailure, hookID: hookID, arguments: arguments))
+            guard succeeded else {
+                throw MCPError.notFound("Hook \(hookID.uuidString) was not found on tracker \(trackerID.uuidString).")
+            }
+
+            // If trigger changed, move the hook between lists. We detect
+            // this by looking for the hook in the "wrong" list relative
+            // to its updated trigger.
+            if let hook = (tracker.hooks.onSuccess + tracker.hooks.onFailure).first(where: { $0.id == hookID }) {
+                let needsMove: Bool
+                switch hook.trigger {
+                case .onSuccess: needsMove = !tracker.hooks.onSuccess.contains(where: { $0.id == hookID })
+                case .onFailure: needsMove = !tracker.hooks.onFailure.contains(where: { $0.id == hookID })
+                }
+                if needsMove {
+                    tracker.hooks.onSuccess.removeAll { $0.id == hookID }
+                    tracker.hooks.onFailure.removeAll { $0.id == hookID }
+                    switch hook.trigger {
+                    case .onSuccess: tracker.hooks.onSuccess.append(hook)
+                    case .onFailure: tracker.hooks.onFailure.append(hook)
+                    }
+                }
+                updatedHook = hook
+            }
+
+            configuration.trackers[trackerIndex] = tracker
+        }
+
+        notifyConfigurationChanged()
+        guard let hook = updatedHook else {
+            throw MCPError.internalError("update_tracker_hook lost the updated hook in flight.")
+        }
+        return ["hookId": hook.id.uuidString, "hook": hookPayload(hook)]
+    }
+
+    /// Helper: applies argument overrides to a hook found in `list` and
+    /// returns true when the hook was found (regardless of whether any
+    /// field actually changed). Throws on bad argument types.
+    private static func updateHookInList(_ list: inout [TrackerHook], hookID: UUID, arguments: [String: Any]) throws -> Bool {
+        guard let index = list.firstIndex(where: { $0.id == hookID }) else {
+            return false
+        }
+        var hook = list[index]
+        if let value = arguments["name"] as? String {
+            hook.name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if arguments.keys.contains("trigger") {
+            hook.trigger = try hookTriggerArgument(arguments["trigger"])
+        }
+        if arguments.keys.contains("actionKind") {
+            hook.actionKind = try hookActionKindArgument(arguments["actionKind"])
+        }
+        if let value = arguments["actionPayload"] as? String {
+            hook.actionPayload = value
+        }
+        if let value = arguments["enabled"] as? Bool {
+            hook.enabled = value
+        }
+        list[index] = hook
+        return true
+    }
+
+    private static func deleteTrackerHook(_ arguments: [String: Any]) throws -> Any {
+        let trackerID = try uuidArgument("trackerId", arguments)
+        let hookID = try uuidArgument("hookId", arguments)
+
+        try AppGroupStore.mutateSharedConfiguration { configuration in
+            guard let trackerIndex = configuration.trackers.firstIndex(where: { $0.id == trackerID }) else {
+                throw MCPError.notFound("Tracker \(trackerID.uuidString) was not found.")
+            }
+            configuration.trackers[trackerIndex].hooks.onSuccess.removeAll { $0.id == hookID }
+            configuration.trackers[trackerIndex].hooks.onFailure.removeAll { $0.id == hookID }
+        }
+        notifyConfigurationChanged()
+        return ["ok": true]
+    }
+
+    private static func hookTriggerArgument(_ value: Any?) throws -> HookTrigger {
+        guard let raw = value as? String, let trigger = HookTrigger(rawValue: raw) else {
+            let valid = HookTrigger.allCases.map(\.rawValue).joined(separator: ", ")
+            throw MCPError.invalidParams("trigger must be one of \(valid).")
+        }
+        return trigger
+    }
+
+    private static func hookActionKindArgument(_ value: Any?) throws -> HookActionKind {
+        guard let raw = value as? String, let kind = HookActionKind(rawValue: raw) else {
+            let valid = HookActionKind.allCases.map(\.rawValue).joined(separator: ", ")
+            throw MCPError.invalidParams("actionKind must be one of \(valid).")
+        }
+        return kind
+    }
+
+    private static func hookPayload(_ hook: TrackerHook) -> [String: Any] {
+        var payload: [String: Any] = [
+            "id": hook.id.uuidString,
+            "name": hook.name,
+            "trigger": hook.trigger.rawValue,
+            "actionKind": hook.actionKind.rawValue,
+            "actionPayload": hook.actionPayload,
+            "enabled": hook.enabled
+        ]
+        if let builtIn = hook.builtInIdentifier {
+            payload["builtInIdentifier"] = builtIn
+        }
+        if let lastRun = hook.lastRun {
+            payload["lastRun"] = hookLastRunPayload(lastRun)
+        }
+        return payload
+    }
+
+    private static func hookLastRunPayload(_ lastRun: HookLastRun) -> [String: Any] {
+        var payload: [String: Any] = [
+            "startedAt": ISO8601DateFormatter().string(from: lastRun.startedAt),
+            "status": lastRun.status.rawValue
+        ]
+        if let finishedAt = lastRun.finishedAt {
+            payload["finishedAt"] = ISO8601DateFormatter().string(from: finishedAt)
+        }
+        if let exitCode = lastRun.exitCode {
+            payload["exitCode"] = exitCode
+        }
+        if let detail = lastRun.detail {
+            payload["detail"] = detail
+        }
+        return payload
+    }
+
     private static func blockingScrape(_ tracker: Tracker) -> Result<TrackerReading, Error> {
         var result: Result<TrackerReading, Error>?
         ChromeCDPScraper.scrape(tracker: tracker) { scrapeResult in
@@ -1461,6 +1705,10 @@ private enum MCPToolDispatcher {
             "gradientMode": tracker.gradientMode.rawValue,
             "valueTransform": tracker.valueTransform.rawValue,
             "hideElements": tracker.hideElements,
+            "hooks": [
+                "onSuccess": tracker.hooks.onSuccess.map(hookPayload),
+                "onFailure": tracker.hooks.onFailure.map(hookPayload)
+            ],
             "reading": AppGroupStore.reading(for: tracker.id).map { readingPayload($0, includeHistory: includeHistory) } as Any? ?? NSNull()
         ]
 
